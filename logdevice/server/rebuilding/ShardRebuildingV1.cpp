@@ -120,7 +120,8 @@ void ShardRebuildingV1::noteConfigurationChanged() {
       // or not
       continue;
     }
-    const LogsConfig::LogGroupNode* l = config->getLogGroupByIDRaw(logid);
+    const std::shared_ptr<LogsConfig::LogGroupNode> l =
+        config->getLogGroupByIDShared(logid);
     if (!l) {
       ld_info("Log:%lu marked for rebuilding was removed from config.",
               logid.val());
@@ -250,9 +251,7 @@ void ShardRebuildingV1::sendRestartLogRebuildingRequest(int worker_id,
 
 void ShardRebuildingV1::activateStallTimer() {
   if (!stallTimer_) {
-    stallTimer_ = folly::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(),
-        [this] { onStallTimerExpired(); });
+    stallTimer_ = folly::make_unique<Timer>([this] { onStallTimerExpired(); });
   }
 
   ld_check(stallTimer_);
@@ -372,8 +371,8 @@ void ShardRebuildingV1::activateRestartTimerForLog(logid_t logid) {
   ld_assert(activeLogs_.count(logid));
   auto it = activeLogs_.find(logid);
   if (!it->second.restartTimer) {
-    it->second.restartTimer = folly::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(),
+    it->second.restartTimer = folly::make_unique<Timer>(
+
         [this, logid] { onRestartTimerExpiredForLog(logid); });
   }
   it->second.restartTimer->activate(

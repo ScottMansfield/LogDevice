@@ -67,8 +67,7 @@ Request::Execution TrimMetaDataLogRequest::execute() {
   // if start delay is specified, start a timer to defer starting the
   // entire operation
   if (start_delay_ > std::chrono::milliseconds::zero()) {
-    start_delay_timer_ = std::make_unique<LibeventTimer>(
-        Worker::onThisThread()->getEventBase(), [this] { start(); });
+    start_delay_timer_ = std::make_unique<Timer>([this] { start(); });
 
     start_delay_timer_->activate(
         start_delay_, &Worker::onThisThread()->commonTimeouts());
@@ -81,7 +80,8 @@ Request::Execution TrimMetaDataLogRequest::execute() {
 
 void TrimMetaDataLogRequest::start() {
   // get backlog duration of the data log
-  const LogsConfig::LogGroupNode* log = config_->getLogGroupByIDRaw(log_id_);
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config_->getLogGroupByIDShared(log_id_);
   if (!log) {
     ld_warning("Cannot determine backlog duration, log %lu not found in "
                "config!",
@@ -176,8 +176,7 @@ void TrimMetaDataLogRequest::readTrimGapDataLog() {
 
   // start a timer for reading the data log
   ld_check(reader_timer_ == nullptr);
-  reader_timer_ = std::make_unique<LibeventTimer>(
-      Worker::onThisThread()->getEventBase(), [this] { onReadTimeout(); });
+  reader_timer_ = std::make_unique<Timer>([this] { onReadTimeout(); });
 
   reader_timer_->activate(
       read_timeout_, &Worker::onThisThread()->commonTimeouts());
@@ -285,9 +284,8 @@ void TrimMetaDataLogRequest::finalizeReadingDataLog(Status st) {
 
   // use a zero timer to schedule the destruction of the read stream
   // in the next event loop iteration
-  destroy_readstream_timer_ = std::make_unique<LibeventTimer>(
-      Worker::onThisThread()->getEventBase(),
-      [this, st] { onDestroyReadStreamTimedout(st); });
+  destroy_readstream_timer_ =
+      std::make_unique<Timer>([this, st] { onDestroyReadStreamTimedout(st); });
   destroy_readstream_timer_->activate(
       std::chrono::milliseconds::zero(),
       &Worker::onThisThread()->commonTimeouts());
@@ -346,8 +344,7 @@ void TrimMetaDataLogRequest::readMetaDataLog() {
 
   // start a timer for reading the metadata log
   if (reader_timer_ == nullptr) {
-    reader_timer_ = std::make_unique<LibeventTimer>(
-        Worker::onThisThread()->getEventBase(), [this] { onReadTimeout(); });
+    reader_timer_ = std::make_unique<Timer>([this] { onReadTimeout(); });
   } else {
     // we used the read_timer_ for data log reading
     ld_check(!backlog_.hasValue());
@@ -587,6 +584,9 @@ void TrimMetaDataLogRequest::trimMetaDataLog() {
   // set the request affinity to the same worker thread
   request->setTargetWorker(current_worker_);
   request->bypassWriteTokenCheck();
+  // This is a hack to work around SyncSequencerRequest returning underestimated
+  // next_lsn for metadata logs.
+  request->bypassTailLSNCheck();
 
   std::unique_ptr<Request> req(std::move(request));
   int rv = processor_->postWithRetrying(req);

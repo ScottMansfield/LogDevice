@@ -14,8 +14,8 @@
 #include "logdevice/common/Request.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/common/replicated_state_machine/TrimRSMRequest.h"
 #include "logdevice/common/replicated_state_machine/ReplicatedStateMachine.h"
+#include "logdevice/common/replicated_state_machine/TrimRSMRequest.h"
 
 namespace facebook { namespace logdevice {
 
@@ -27,7 +27,7 @@ TrimRSMRetryHandler::TrimRSMRetryHandler(logid_t delta_log_id,
       rsm_type_(rsm_type),
       ref_holder_(this) {
   retry_timer_ = std::make_unique<ExponentialBackoffTimer>(
-      EventLoop::onThisThread()->getEventBase(),
+
       std::bind(&TrimRSMRetryHandler::trimImpl, this),
       std::chrono::seconds{5},
       std::chrono::seconds{300});

@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include "logdevice/common/configuration/nodes/NodeRole.h"
 #include "logdevice/include/types.h"
 
 namespace facebook { namespace logdevice { namespace membership {
@@ -36,6 +37,6 @@ constexpr Type MAINTENANCE_PROVISION{1};
 
 // there should be one membership type for each NodeRole
 // (defined in common/configuration/Node.h) that requires a membership
-enum class MembershipType { SEQUENCER, STORAGE };
+using MembershipType = configuration::nodes::NodeRole;
 
 }}} // namespace facebook::logdevice::membership

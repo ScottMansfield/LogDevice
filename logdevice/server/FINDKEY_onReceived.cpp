@@ -7,9 +7,9 @@
  */
 #include "FINDKEY_onReceived.h"
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/FindKeyTracer.h"
 #include "logdevice/common/Sender.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/protocol/FINDKEY_REPLY_Message.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/server/FindKeyStorageTask.h"
@@ -150,6 +150,14 @@ Message::Disposition FINDKEY_onReceived(FINDKEY_Message* msg,
     if (log_state == nullptr ||        // LogStorageStateMap is at capacity
         log_state->hasPermanentError() // LogStorageState may be stale.
     ) {
+      RATELIMIT_ERROR(std::chrono::seconds(10),
+                      10,
+                      "Got FINDKEY message from client %s but the "
+                      "LogStorageStateMap is at capacity (%d) or is in "
+                      "permanent error (%d)",
+                      Sender::describeConnection(from).c_str(),
+                      log_state == nullptr,
+                      log_state->hasPermanentError());
       send_error(from, msg->header_.client_rqid, E::FAILED, shard_idx, tracer);
       return Message::Disposition::NORMAL;
     }

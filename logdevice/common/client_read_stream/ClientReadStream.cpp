@@ -10,6 +10,7 @@
 #include "ClientReadStream.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cinttypes>
 #include <utility>
 
@@ -310,22 +311,21 @@ void ClientReadStream::getDebugInfo(InfoClientReadStreamsTable& table) const {
   }
 
   if (readers_flow_tracer_) {
-    auto records = readers_flow_tracer_->getAsyncRecords();
-    if (records.has_value()) {
-      auto val = records.value();
-      if (val.bytes_lagged.has_value()) {
-        table.set<15>(val.bytes_lagged.value());
-      }
-      if (val.bytes_lagged_delta.has_value()) {
-        table.set<16>(val.bytes_lagged_delta.value());
-      }
-      if (val.timestamp_lagged.hasValue()) {
-        table.set<17>(val.timestamp_lagged.value());
-      }
-      if (val.timestamp_lagged_delta.has_value()) {
-        table.set<18>(val.timestamp_lagged_delta.value());
-      }
+    auto last_bytes_lagged = readers_flow_tracer_->estimateByteLag();
+    if (last_bytes_lagged.has_value()) {
+      table.set<15>(last_bytes_lagged.value());
     }
+    auto last_timestamp_lagged = readers_flow_tracer_->estimateTimeLag();
+    if (last_timestamp_lagged.has_value()) {
+      table.set<16>(last_timestamp_lagged.value());
+    }
+    table.set<17>(
+        to_msec((readers_flow_tracer_->last_time_lagging_.time_since_epoch())));
+    table.set<18>(
+        to_msec((readers_flow_tracer_->last_time_stuck_.time_since_epoch())));
+    table.set<19>(readers_flow_tracer_->lastReportedStatePretty());
+    table.set<20>(readers_flow_tracer_->lastTailInfoPretty());
+    table.set<21>(readers_flow_tracer_->timeLagRecordPretty());
   }
 }
 
@@ -334,7 +334,7 @@ void ClientReadStream::start() {
   started_ = true;
 
   immediate_rewind_timer_ =
-      deps_->createLibeventTimer([this] { rewind(rewind_reason_); });
+      deps_->createTimer([this] { rewind(rewind_reason_); });
 
   gap_tracer_ = std::make_unique<ClientGapTracer>(
       Worker::onThisThread(false) ? Worker::onThisThread()->getTraceLogger()
@@ -418,6 +418,7 @@ void ClientReadStream::startContinuation(
 
   auto attrs = log_config->attrs();
   sequencer_window_size_ = *attrs.maxWritesInFlight();
+  log_group_name_ = log_config->name();
 
   log_uses_scd_ = attrs.scdEnabled().hasValue() && *attrs.scdEnabled();
   log_uses_local_scd_ =
@@ -1834,6 +1835,9 @@ void ClientReadStream::onReaderProgress() {
   }
 
   window_update_pending_ = false;
+  if (readers_flow_tracer_) {
+    readers_flow_tracer_->onWindowUpdateSent();
+  }
 
   disposeIfDone();
 }
@@ -2824,7 +2828,7 @@ void ClientReadStream::checkConsistency() const {
 
 void ClientReadStream::resumeReading() {
   if (redelivery_timer_ != nullptr && redelivery_timer_->isActive()) {
-    redelivery_timer_->cancel();
+    cancelRedeliveryTimer();
     redeliver();
     // `this` may be deleted here.
   }
@@ -3305,18 +3309,48 @@ void ClientReadStream::deliverNoConfigGapAndDispose() {
 
 void ClientReadStream::adjustRedeliveryTimer(bool delivery_success) {
   if (delivery_success) {
-    if (redelivery_timer_ != nullptr) {
-      redelivery_timer_->reset();
-    }
+    resetRedeliveryTimer();
   } else {
-    if (redelivery_timer_ == nullptr) {
-      redelivery_timer_ = deps_->createBackoffTimer(
-          deps_->getSettings().client_initial_redelivery_delay,
-          deps_->getSettings().client_max_redelivery_delay);
-      redelivery_timer_->setCallback(
-          std::bind(&ClientReadStream::redeliver, this));
+    activateRedeliveryTimer();
+  }
+}
+
+void ClientReadStream::activateRedeliveryTimer() {
+  if (!redelivery_timer_) {
+    redelivery_timer_ = deps_->createBackoffTimer(
+        deps_->getSettings().client_initial_redelivery_delay,
+        deps_->getSettings().client_max_redelivery_delay);
+    redelivery_timer_->setCallback([this]() {
+      if (readers_flow_tracer_) {
+        readers_flow_tracer_->onRedeliveryTimerInactive();
+      }
+      redeliver();
+    });
+  }
+  bool was_active = redelivery_timer_->isActive();
+  redelivery_timer_->activate();
+  if (readers_flow_tracer_ && !was_active) {
+    readers_flow_tracer_->onRedeliveryTimerActive();
+  }
+}
+
+void ClientReadStream::resetRedeliveryTimer() {
+  if (redelivery_timer_) {
+    bool was_active = redelivery_timer_->isActive();
+    redelivery_timer_->reset();
+    if (readers_flow_tracer_ && was_active) {
+      readers_flow_tracer_->onRedeliveryTimerInactive();
     }
-    redelivery_timer_->activate();
+  }
+}
+
+void ClientReadStream::cancelRedeliveryTimer() {
+  if (redelivery_timer_) {
+    bool was_active = redelivery_timer_->isActive();
+    redelivery_timer_->cancel();
+    if (readers_flow_tracer_ && was_active) {
+      readers_flow_tracer_->onRedeliveryTimerInactive();
+    }
   }
 }
 
@@ -3497,6 +3531,9 @@ bool ClientReadStream::slideSenderWindows() {
   if (reader_) {
     // Let onReaderProgress() know that it needs to send WINDOW messages
     window_update_pending_ = true;
+    if (readers_flow_tracer_) {
+      readers_flow_tracer_->onWindowUpdatePending();
+    }
   } else {
     updateServerWindow();
     scd_->onWindowSlid(server_window_.high, filter_version_);
@@ -3804,7 +3841,8 @@ void ClientReadStream::scheduleRewind(std::string reason) {
   } else {
     rewind_reason_ = std::move(reason);
     rewind_scheduled_ = true;
-    immediate_rewind_timer_->activate(deps_->getZeroTimeout());
+    immediate_rewind_timer_->activate(
+        std::chrono::microseconds(0), deps_->getCommonTimeouts());
   }
 }
 
@@ -4033,12 +4071,7 @@ void ClientReadStreamDependencies::getMetaDataForEpoch(
       ld_check(!require_consistent_from_cache ||
                source == MetaDataLogReader::RecordSource::CACHED_CONSISTENT);
 
-      if (delivery_timer_ == nullptr) {
-        delivery_timer_ = std::make_unique<LibeventTimer>(
-            EventLoop::onThisThread()->getEventBase());
-      }
-
-      delivery_timer_->setCallback([this, epoch, until, source, cb] {
+      auto callback = [this, epoch, until, source, cb] {
         cb(E::OK,
            {log_id_,
             epoch,
@@ -4047,11 +4080,18 @@ void ClientReadStreamDependencies::getMetaDataForEpoch(
             compose_lsn(epoch, esn_t(1)),
             std::chrono::milliseconds(0),
             std::move(metadata_cached_)});
-      });
+      };
+
+      if (delivery_timer_ == nullptr) {
+        delivery_timer_ = std::make_unique<Timer>(std::move(callback));
+      } else {
+        delivery_timer_->setCallback(std::move(callback));
+      }
 
       // deliver the metadata on the next event loop iteration to avoid
       // recursively calling findGapsAndRecords()
-      delivery_timer_->activate(Worker::onThisThread()->zero_timeout_);
+      delivery_timer_->activate(std::chrono::microseconds(0),
+                                &Worker::onThisThread()->commonTimeouts());
 
       ld_debug("Got epoch metadata from client cache for epoch %u of log %lu. "
                "metadata epoch %u, effective until %u, metadata: %s",
@@ -4254,7 +4294,7 @@ void ClientReadStreamDependencies::dispose() {
 std::unique_ptr<BackoffTimer> ClientReadStreamDependencies::createBackoffTimer(
     const chrono_expbackoff_t<std::chrono::milliseconds>& settings) {
   auto timer = std::make_unique<ExponentialBackoffTimer>(
-      EventLoop::onThisThread()->getEventBase(),
+
       std::function<void()>(), // SenderState will change
       settings);
   // Tell the timer to use a TimeoutMap common to all ClientReadStream
@@ -4293,33 +4333,27 @@ void ClientReadStreamDependencies::updateBackoffTimerSettings(
 
 std::chrono::milliseconds
 ClientReadStreamDependencies::computeGapGracePeriod() const {
-  auto gap_grace_period = getSettings().gap_grace_period;
-  if (!MetaDataLog::isMetaDataLog(log_id_)) {
-    // Overwrite grace period for data logs if setting is non-zero.
-    auto dlog_ggp = getSettings().data_log_gap_grace_period;
-    if (dlog_ggp != decltype(dlog_ggp)::zero()) {
-      gap_grace_period = dlog_ggp;
-    }
+  using std::chrono::milliseconds;
+  milliseconds ggp{0};
+  if (MetaDataLog::isMetaDataLog(log_id_)) {
+    ggp = std::max(ggp, getSettings().metadata_log_gap_grace_period);
+  } else {
+    ggp = std::max(ggp, getSettings().data_log_gap_grace_period);
   }
-  return gap_grace_period;
+  if (ggp == milliseconds::zero()) {
+    ggp = getSettings().gap_grace_period;
+  }
+  return ggp;
 }
 
-std::unique_ptr<LibeventTimer>
-ClientReadStreamDependencies::createLibeventTimer(std::function<void()> cb) {
-  auto timer = std::make_unique<LibeventTimer>(
-      EventLoop::onThisThread()->getEventBase());
-  if (cb != nullptr) {
-    timer->setCallback(cb);
-  }
+std::unique_ptr<Timer>
+ClientReadStreamDependencies::createTimer(std::function<void()> cb) {
+  auto timer = std::make_unique<Timer>(cb);
   return timer;
 }
 
 TimeoutMap* ClientReadStreamDependencies::getCommonTimeouts() {
   return &Worker::onThisThread()->commonTimeouts();
-}
-
-const struct timeval* ClientReadStreamDependencies::getZeroTimeout() {
-  return EventLoop::onThisThread()->zero_timeout_;
 }
 
 std::function<ClientReadStream*(read_stream_id_t)>

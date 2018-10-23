@@ -56,10 +56,8 @@ EpochRecovery::EpochRecovery(logid_t log_id,
                // settings allow _and_ log id is not a metadata log
                !MetaDataLog::isMetaDataLog(log_id_) &&
                deps_->getSettings().bridge_record_in_empty_epoch}),
-      grace_period_(
-          deps_->createLibeventTimer([this] { onGracePeriodExpired(); })),
-      mutation_and_cleaning_(
-          deps_->createLibeventTimer([this] { onTimeout(); })) {
+      grace_period_(deps_->createTimer([this] { onGracePeriodExpired(); })),
+      mutation_and_cleaning_(deps_->createTimer([this] { onTimeout(); })) {
   ld_check(log_id_ != LOGID_INVALID);
   ld_check(epoch_ != EPOCH_INVALID);
   ld_check(deps_ != nullptr);
@@ -595,8 +593,6 @@ void EpochRecovery::updateEpochTailRecord() {
         std::shared_ptr<PayloadHolder>());
   };
 
-  uint64_t prev_epoch_offset =
-      tail_record_before_this_epoch_.header.u.byte_offset;
   if (tail_esn_ < digest_start_esn_) {
     // tail record is outside of the digest, this can only happen when
     // tail record is already fetched in the seal phase and it is the same as
@@ -695,11 +691,16 @@ void EpochRecovery::updateEpochTailRecord() {
   // if the tail record happen to have an offset within epoch associated with
   // it, use that as the epoch size, otherwise, use the maximum epoch size
   // reported in SEALED replies as an approximation
+  // TODO(T33977412)
   if (final_tail_record_.header.u.offset_within_epoch == BYTE_OFFSET_INVALID) {
     if (epoch_size_ != BYTE_OFFSET_INVALID) {
+      // TODO(T33977412): Remove offset_within_epoch
       final_tail_record_.header.u.offset_within_epoch = epoch_size_;
+      final_tail_record_.offsets_map_.setCounter(
+          CounterType::BYTE_OFFSET, epoch_size_);
     } else {
       final_tail_record_.header.u.offset_within_epoch = 0;
+      final_tail_record_.offsets_map_.setCounter(CounterType::BYTE_OFFSET, 0);
     }
   }
 
@@ -712,8 +713,12 @@ void EpochRecovery::updateEpochTailRecord() {
   // within epoch. Its byte offset should be the sum of the epoch size (offset
   // within epoch of the tail record) and the accumulative byte offset from the
   // previous epoch
+  // TODO(T33977412): Remove byte_offset when fully deployed
+  auto& prev_epoch_offsets_map = tail_record_before_this_epoch_.offsets_map_;
+  final_tail_record_.offsets_map_ += prev_epoch_offsets_map;
   final_tail_record_.header.u.byte_offset =
-      final_tail_record_.header.u.offset_within_epoch + prev_epoch_offset;
+      final_tail_record_.header.u.offset_within_epoch +
+      prev_epoch_offsets_map.getCounter(CounterType::BYTE_OFFSET);
   final_tail_record_.header.flags &= ~TailRecordHeader::OFFSET_WITHIN_EPOCH;
   ld_check(!final_tail_record_.containOffsetWithinEpoch());
 
@@ -1842,19 +1847,15 @@ void EpochRecoveryDependencies::noteMutationsCompleted(
 std::unique_ptr<BackoffTimer> EpochRecoveryDependencies::createBackoffTimer(
     const chrono_expbackoff_t<std::chrono::milliseconds>& backoff,
     std::function<void()> callback) {
-  auto timer = std::make_unique<ExponentialBackoffTimer>(
-      EventLoop::onThisThread()->getEventBase(), std::move(callback), backoff);
+  auto timer =
+      std::make_unique<ExponentialBackoffTimer>(std::move(callback), backoff);
   timer->setTimeoutMap(&Worker::onThisThread()->commonTimeouts());
   return std::move(timer);
 }
 
-std::unique_ptr<LibeventTimer>
-EpochRecoveryDependencies::createLibeventTimer(std::function<void()> cb) {
-  auto timer = std::make_unique<LibeventTimer>(
-      EventLoop::onThisThread()->getEventBase());
-  if (cb != nullptr) {
-    timer->setCallback(cb);
-  }
+std::unique_ptr<Timer>
+EpochRecoveryDependencies::createTimer(std::function<void()> cb) {
+  auto timer = std::make_unique<Timer>(cb);
   return timer;
 }
 

@@ -15,22 +15,17 @@
 #include <utility>
 
 #include <boost/intrusive/set.hpp>
-
 #include <folly/IntrusiveList.h>
 #include <folly/Optional.h>
 
 #include "logdevice/common/AdminCommandTable-fwd.h"
 #include "logdevice/common/BWAvailableCallback.h"
 #include "logdevice/common/ClientID.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/WeakRefHolder.h"
-#include "logdevice/common/types_internal.h"
-
 #include "logdevice/common/protocol/GAP_Message.h"
 #include "logdevice/common/protocol/STARTED_Message.h"
-
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/types.h"
-
 #include "logdevice/server/read_path/ServerReadStream.h"
 
 namespace facebook { namespace logdevice {
@@ -49,7 +44,7 @@ namespace facebook { namespace logdevice {
 
 class AllServerReadStreams;
 class BackoffTimer;
-class LibeventTimer;
+class Timer;
 class LogStorageStateMap;
 class ReadStorageTask;
 class RECORD_Message;
@@ -112,7 +107,7 @@ class CatchupQueueDependencies {
    * Creates a timer to use for iterator invalidation. See doc for
    * CatchupQueue::iterator_invalidation_timer_.
    */
-  virtual std::unique_ptr<LibeventTimer>
+  virtual std::unique_ptr<Timer>
   createIteratorTimer(std::function<void()> callback);
 
   virtual std::chrono::milliseconds iteratorTimerTTL() const;
@@ -246,7 +241,7 @@ class CatchupQueue {
 
   /**
    * Called after a ReadStorageTask completes on a storage thread.  The
-   * docblock for LocalLogStoreReader::execute() explains the output.
+   * docblock for LocalLogStoreReader::read() explains the output.
    */
   void onReadTaskDone(const ReadStorageTask& task);
 
@@ -332,7 +327,7 @@ class CatchupQueue {
   // Timer used to periodically go through all read streams handled by this
   // CatchupQueue in order to ensure that iterators are not holding references
   // to potentially unused resources.
-  std::unique_ptr<LibeventTimer> iterator_invalidation_timer_;
+  std::unique_ptr<Timer> iterator_invalidation_timer_;
 
   /**
    * Helper method used in pushRecords(). Moves all streams from queue_delayed_

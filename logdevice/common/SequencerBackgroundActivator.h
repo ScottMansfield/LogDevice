@@ -10,10 +10,10 @@
 #include <memory>
 #include <unordered_set>
 
+#include "logdevice/common/ResourceBudget.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/types.h"
-#include "logdevice/common/LibeventTimer.h"
-#include "logdevice/common/ResourceBudget.h"
 
 namespace facebook { namespace logdevice {
 
@@ -71,7 +71,7 @@ class SequencerBackgroundActivator {
   std::unordered_set<logid_t::raw_type> queue_;
 
   // timer for retrying processing the queue later in case of failures
-  LibeventTimer retry_timer_;
+  Timer retry_timer_;
 
   // limiter on the number of activations
   std::unique_ptr<ResourceBudget> budget_;

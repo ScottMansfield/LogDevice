@@ -8,7 +8,6 @@
 #pragma once
 
 #include "PartitionedRocksDBStore.h"
-
 #include "logdevice/server/locallogstore/RocksDBLocalLogStore.h"
 #include "logdevice/server/locallogstore/RocksDBLogStoreBase.h"
 
@@ -64,6 +63,10 @@ class PartitionedRocksDBStore::Iterator : public LocalLogStore::ReadIterator {
     if (data_iterator_) {
       data_iterator_->setContextString(str);
     }
+  }
+
+  size_t getIOBytesUnnormalized() const override {
+    return RocksDBLogStoreBase::getIOBytesUnnormalized();
   }
 
  private:
@@ -295,6 +298,10 @@ class PartitionedRocksDBStore::PartitionedAllLogsIterator
 
   const LocalLogStore* getStore() const override;
   bool tracingEnabled() const override;
+
+  size_t getIOBytesUnnormalized() const override {
+    return RocksDBLogStoreBase::getIOBytesUnnormalized();
+  }
 
  private:
   // Goes to the first existing partition between `partition` and

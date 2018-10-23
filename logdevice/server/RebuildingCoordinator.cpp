@@ -207,11 +207,9 @@ void RebuildingCoordinator::startOnWorkerThread() {
 
   scheduledRestarts_.reserve(numShards());
   for (shard_index_t s = 0; s < numShards(); ++s) {
-    auto timer = std::make_unique<LibeventTimer>(
-        Worker::onThisThread()->getEventBase(), [self = this, shard = s] {
-          self->restartForShard(
-              shard, self->event_log_->getCurrentRebuildingSet());
-        });
+    auto timer = std::make_unique<Timer>([self = this, shard = s] {
+      self->restartForShard(shard, self->event_log_->getCurrentRebuildingSet());
+    });
     scheduledRestarts_.emplace_back(std::move(timer));
   }
 
@@ -953,7 +951,7 @@ void RebuildingCoordinator::onFinishedRetrievingPlans(uint32_t shard_idx,
   auto config = config_->get();
   for (auto it = shard_state.logsWithPlan.begin();
        it != shard_state.logsWithPlan.end();) {
-    if (!config->getLogGroupByIDRaw(it->first)) {
+    if (!config->getLogGroupByIDShared(it->first)) {
       it = shard_state.logsWithPlan.erase(it);
     } else {
       ++it;

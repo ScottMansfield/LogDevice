@@ -12,27 +12,25 @@
 #include <memory>
 #include <string>
 #include <type_traits>
-#include <opentracing/tracer.h>
 
 #include <boost/intrusive/unordered_set.hpp>
 #include <folly/Optional.h>
 #include <folly/small_vector.h>
+#include <opentracing/tracer.h>
 
 #include "logdevice/common/AppenderTracer.h"
 #include "logdevice/common/CopySetManager.h"
 #include "logdevice/common/ExponentialBackoffTimer.h"
 #include "logdevice/common/IntrusiveUnorderedMap.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeSetState.h"
+#include "logdevice/common/OffsetMap.h"
 #include "logdevice/common/RecipientSet.h"
 #include "logdevice/common/RecordID.h"
 #include "logdevice/common/Request.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Timestamp.h"
 #include "logdevice/common/WeakRefHolder.h"
-#include "logdevice/common/OffsetMap.h"
-
 #include "logdevice/common/protocol/STORED_Message.h"
-
 #include "logdevice/common/stats/Stats.h"
 
 namespace facebook { namespace logdevice {
@@ -785,7 +783,7 @@ class Appender : public IntrusiveUnorderedMapHook {
   // special timer, set up with a zero timeout, used to trigger another wave
   // of STOREs to be sent on the next iteration of the event loop
   // Note: in tests, this is left uninitialized.
-  LibeventTimer retry_timer_;
+  Timer retry_timer_;
 
   // If the append was created by SequencerBatching, this contains the number
   // of constituent appends (APPEND messages that came over the wire).  Used

@@ -8,12 +8,23 @@
 
 #include "OffsetMap.h"
 
+#include "logdevice/common/protocol/ProtocolReader.h"
+#include "logdevice/common/protocol/ProtocolWriter.h"
+
 namespace facebook { namespace logdevice {
 OffsetMap::OffsetMap() {}
 
+OffsetMap::OffsetMap(const OffsetMap& om) noexcept {
+  this->counterTypeMap_ = om.getCounterMap();
+}
+
 void OffsetMap::setCounter(const CounterType counter_type,
                            uint64_t counter_val) {
-  counterTypeMap_[counter_type] = counter_val;
+  if (counter_val == BYTE_OFFSET_INVALID) {
+    counterTypeMap_.erase(counter_type);
+  } else {
+    counterTypeMap_[counter_type] = counter_val;
+  }
 }
 
 bool OffsetMap::isValid() const {
@@ -86,6 +97,40 @@ OffsetMap OffsetMap::operator+(const OffsetMap& om) const {
   OffsetMap result = *this;
   result += om;
   return result;
+}
+
+OffsetMap& OffsetMap::operator=(const OffsetMap& om) noexcept {
+  this->counterTypeMap_ = om.getCounterMap();
+  return *this;
+}
+
+OffsetMap& OffsetMap::operator=(OffsetMap&& om) noexcept {
+  this->counterTypeMap_ = std::move(om.counterTypeMap_);
+  return *this;
+}
+
+OffsetMap::OffsetMap(OffsetMap&& om) noexcept {
+  this->counterTypeMap_ = std::move(om.counterTypeMap_);
+}
+
+std::string OffsetMap::toString() const {
+  std::string res = "{";
+  bool first = true;
+  for (const auto& counter : counterTypeMap_) {
+    if (!first) {
+      res += ", ";
+    }
+    first = false;
+    res += std::to_string(static_cast<uint8_t>(counter.first));
+    res += ":";
+    if (counter.second == BYTE_OFFSET_INVALID) {
+      res += "invalid";
+    } else {
+      res += std::to_string(counter.second);
+    }
+  }
+  res += "}";
+  return res;
 }
 
 }} // namespace facebook::logdevice

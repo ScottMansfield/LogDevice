@@ -8,13 +8,14 @@
 #include "GetLogInfoRequest.h"
 
 #include <folly/Memory.h>
-#include "logdevice/common/configuration/Configuration.h"
+
 #include "logdevice/common/EventLoop.h"
 #include "logdevice/common/Processor.h"
-#include "logdevice/common/Sender.h"
 #include "logdevice/common/RandomNodeSelector.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/Sender.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/LOGS_CONFIG_API_Message.h"
 
@@ -29,6 +30,8 @@ Request::Execution GetLogInfoRequest::execute() {
       Worker::onThisThread()->runningGetLogInfo().gli_map.insert(
           std::make_pair(id_, std::unique_ptr<GetLogInfoRequest>(this)));
   ld_check(insert_result.second);
+
+  Worker::onThisThread()->activateClusterStatePolling();
 
   start();
   return Execution::CONTINUE;
@@ -55,7 +58,13 @@ void GetLogInfoRequest::changeTargetNode(std::unique_lock<std::mutex>& lock) {
   const auto config = getConfig()->serverConfig();
   NodeID exclude = shared_state_->node_id_;
 
-  const auto new_node = RandomNodeSelector::getNode(*config, exclude);
+  const auto* worker = Worker::onThisThread(false);
+  ClusterState* cluster_state = nullptr;
+  if (worker != nullptr) {
+    cluster_state = worker->getClusterState();
+  }
+  const auto new_node =
+      RandomNodeSelector::getAliveNode(*config, cluster_state, exclude);
   shared_state_->node_id_ = new_node;
   shared_state_->socket_callback_.reset();
   ld_info("Changing GetLogInfoRequest target node to %s",
@@ -235,10 +244,9 @@ int GetLogInfoRequest::reloadConfig() {
 
 void GetLogInfoRequest::createTimers() {
   target_change_timer_ =
-      std::make_unique<LibeventTimer>(Worker::onThisThread()->getEventBase(),
-                                      [this] { this->onClientTimeout(); });
+      std::make_unique<Timer>([this] { this->onClientTimeout(); });
   retry_timer_ = std::make_unique<ExponentialBackoffTimer>(
-      Worker::onThisThread()->getEventBase(),
+
       [this]() { attemptTargetNodeChange(); },
       Worker::settings().on_demand_logs_config_retry_delay);
 }

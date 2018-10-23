@@ -8,12 +8,13 @@
 #include "LocalLogsConfig.h"
 
 #include <folly/dynamic.h>
-#include "logdevice/include/Err.h"
-#include "logdevice/common/debug.h"
-#include "logdevice/common/configuration/ReplicationProperty.h"
+
 #include "logdevice/common/configuration/ConfigParser.h"
 #include "logdevice/common/configuration/LogsConfigParser.h"
 #include "logdevice/common/configuration/ParsingHelpers.h"
+#include "logdevice/common/configuration/ReplicationProperty.h"
+#include "logdevice/common/debug.h"
+#include "logdevice/include/Err.h"
 
 using facebook::logdevice::logsconfig::LogGroupNode;
 
@@ -61,22 +62,6 @@ LocalLogsConfig::fromJson(const folly::dynamic& parsed,
   local_logs_config->setNamespaceDelimiter(ns_delimiter);
   local_logs_config->markAsFullyLoaded();
   return local_logs_config;
-}
-
-const LogGroupNode* FOLLY_NULLABLE
-LocalLogsConfig::getLogGroupByIDRaw(logid_t id) const {
-  const logsconfig::LogGroupInDirectory* res =
-      config_tree_->getLogGroupByID(id);
-  if (res) {
-    return res->log_group.get();
-  }
-
-  res = internal_logs_.getLogGroupByID(id);
-  if (res) {
-    return res->log_group.get();
-  }
-
-  return nullptr;
 }
 
 folly::Optional<std::string>

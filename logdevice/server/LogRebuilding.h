@@ -7,22 +7,22 @@
  */
 #pragma once
 
-#include <unordered_map>
 #include <chrono>
+#include <unordered_map>
 
 #include <folly/Memory.h>
 
 #include "logdevice/common/AdminCommandTable-fwd.h"
 #include "logdevice/common/BackoffTimer.h"
 #include "logdevice/common/CircularBuffer.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/MetaDataLogReader.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/RebuildingEventsTracer.h"
-#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/RebuildingTypes.h"
 #include "logdevice/common/Request.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Timestamp.h"
+#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/include/types.h"
 #include "logdevice/server/RebuildingReadStorageTask.h"
 #include "logdevice/server/RecordRebuildingAmend.h"
@@ -239,7 +239,7 @@ class LogRebuilding : public LogRebuildingInterface,
    * @param rebuilding_settings  Settings;
    * @param iterator_cache       IteratorCache to be used. Can be nullptr.
    */
-  LogRebuilding(ShardRebuildingRef owner,
+  LogRebuilding(ShardRebuildingV1Ref owner,
                 logid_t logid,
                 shard_index_t shard,
                 UpdateableSettings<RebuildingSettings> rebuilding_settings,
@@ -270,7 +270,7 @@ class LogRebuilding : public LogRebuildingInterface,
     return restartVersion_;
   }
 
-  ShardRebuildingRef getOwner() const {
+  ShardRebuildingV1Ref getOwner() const {
     return owner_;
   }
 
@@ -576,13 +576,13 @@ class LogRebuilding : public LogRebuildingInterface,
   /**
    * Creates a periodic timer to use for iterator invalidation.
    */
-  virtual std::unique_ptr<LibeventTimer> createIteratorTimer();
+  virtual std::unique_ptr<Timer> createIteratorTimer();
 
   /**
    * Creates a timer to stall rebuilding on reaching the memory
    * threshold
    */
-  virtual std::unique_ptr<LibeventTimer> createStallTimer();
+  virtual std::unique_ptr<Timer> createStallTimer();
 
   /**
    * Activates the stall timer
@@ -602,8 +602,7 @@ class LogRebuilding : public LogRebuildingInterface,
   /**
    * Creates a timer with zero-timeout to call `notifyRebuildingCoordinator`
    */
-  virtual std::unique_ptr<LibeventTimer>
-  createNotifyRebuildingCoordinatorTimer();
+  virtual std::unique_ptr<Timer> createNotifyRebuildingCoordinatorTimer();
 
   /**
    * Activates notifyRebuildingCoordinatorTimer_
@@ -613,7 +612,7 @@ class LogRebuilding : public LogRebuildingInterface,
   /**
    * Creates a timer to call `readNewBatch`
    */
-  virtual std::unique_ptr<LibeventTimer> createReadNewBatchTimer();
+  virtual std::unique_ptr<Timer> createReadNewBatchTimer();
 
   /**
    * Activates `readNewBatchTimer_` with zero-timeout.
@@ -636,7 +635,7 @@ class LogRebuilding : public LogRebuildingInterface,
   void notifyRebuildingCoordinator();
 
  private:
-  ShardRebuildingRef owner_;
+  ShardRebuildingV1Ref owner_;
 
   logid_t logid_;
   shard_index_t shard_;
@@ -865,8 +864,6 @@ class LogRebuilding : public LogRebuildingInterface,
   size_t cur_window_total_size_ = 0;
   size_t cur_window_num_batches_ = 0;
 
-  std::unique_ptr<MetaDataLogReader> meta_reader_; // always nullptr in tests.
-
   // Iterators used for this log rebuilding. Created once and reused.
   // Periodically invalidated (if unused) to avoid pinning resources.
   //
@@ -883,18 +880,18 @@ class LogRebuilding : public LogRebuildingInterface,
   // Timer used to periodically invalidate the iterators inside
   // `iteratorCache_` so that they don't pin memtables for too long.
   // This timer is only initialized if iteratorCache_ is not null.
-  std::unique_ptr<LibeventTimer> iteratorInvalidationTimer_;
+  std::unique_ptr<Timer> iteratorInvalidationTimer_;
 
   // Timer used to stall rebuilding when we are ready to read a new batch
   // but have hit the size limit
-  std::unique_ptr<LibeventTimer> stallTimer_;
+  std::unique_ptr<Timer> stallTimer_;
 
   // Timer used to call notifyRebuildingCoordinator in the next iteration of
   // event loop to prevent recursive calls
-  std::unique_ptr<LibeventTimer> notifyRebuildingCoordinatorTimer_;
+  std::unique_ptr<Timer> notifyRebuildingCoordinatorTimer_;
 
   // Timer used to call `readNewBatch` in the next iteration of the event loop
-  std::unique_ptr<LibeventTimer> readNewBatchTimer_;
+  std::unique_ptr<Timer> readNewBatchTimer_;
 
   // A queue of lsns for which stores are durable
   std::queue<lsn_t> lsnStoresDurable_;
@@ -1028,7 +1025,7 @@ class LogRebuilding : public LogRebuildingInterface,
 class StartLogRebuildingRequest : public Request {
  public:
   StartLogRebuildingRequest(
-      ShardRebuildingRef owner,
+      ShardRebuildingV1Ref owner,
       int worker_id,
       logid_t logid,
       shard_index_t shard,
@@ -1056,7 +1053,7 @@ class StartLogRebuildingRequest : public Request {
   }
 
  private:
-  ShardRebuildingRef owner_;
+  ShardRebuildingV1Ref owner_;
   int workerId_;
   logid_t logid_;
   shard_index_t shard_;

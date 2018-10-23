@@ -10,15 +10,16 @@
 #include <queue>
 #include <unordered_map>
 #include <vector>
-#include <folly/hash/Hash.h>
-#include <folly/IntrusiveList.h>
 
-#include "logdevice/include/LogTailAttributes.h"
+#include <folly/IntrusiveList.h>
+#include <folly/hash/Hash.h>
+
 #include "logdevice/common/ExponentialBackoffTimer.h"
 #include "logdevice/common/GetSeqStateRequest.h"
-#include "logdevice/common/LibeventTimer.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/WorkerCallbackHelper.h"
 #include "logdevice/common/types_internal.h"
+#include "logdevice/include/LogTailAttributes.h"
 
 /**
  * @file SyncSequencerRequest.h
@@ -213,7 +214,7 @@ class SyncSequencerRequest : public Request {
   std::unique_ptr<ExponentialBackoffTimer> retry_timer_;
 
   // Timer for giving up after the user provided timeout.
-  std::unique_ptr<LibeventTimer> timeout_timer_;
+  std::unique_ptr<Timer> timeout_timer_;
 
   // Updated the first time we successfully complete a GetSeqStateRequest.
   folly::Optional<lsn_t> nextLsn_;

@@ -22,9 +22,8 @@
 #include <utility>
 #include <vector>
 
-#include <folly/Optional.h>
-
 #include <boost/icl/interval_set.hpp>
+#include <folly/Optional.h>
 
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/ShardID.h"
@@ -468,6 +467,14 @@ ToSharedPtr checked_downcast(const std::shared_ptr<From>& ptr) {
   return std::static_pointer_cast<typename ToSharedPtr::element_type>(ptr);
 }
 
+template <typename T>
+void set_if_not_null(std::add_pointer_t<folly::remove_cvref_t<T>> output,
+                     T&& value) {
+  if (output) {
+    *output = std::forward<T>(value);
+  }
+}
+
 /**
  * Wrap ioprio_set() and ioprio_get() syscalls.
  * @return 0 on success, -1 on error
@@ -501,9 +508,20 @@ std::chrono::seconds to_sec(const T& value) {
   return std::chrono::duration_cast<std::chrono::seconds>(value);
 }
 
-int64_t usec_since(const std::chrono::steady_clock::time_point& start);
-int64_t msec_since(const std::chrono::steady_clock::time_point& start);
-int64_t sec_since(const std::chrono::steady_clock::time_point& start);
+template <typename TimePoint>
+int64_t usec_since(const TimePoint& start) {
+  return to_usec(TimePoint::clock::now() - start).count();
+}
+
+template <typename TimePoint>
+int64_t msec_since(const TimePoint& start) {
+  return to_msec(TimePoint::clock::now() - start).count();
+}
+
+template <typename TimePoint>
+int64_t sec_since(const TimePoint& start) {
+  return to_sec(TimePoint::clock::now() - start).count();
+}
 
 // Erases a single element of the vector by swapping it with the last element
 // first. Note that this will change the order of the elements in the vector

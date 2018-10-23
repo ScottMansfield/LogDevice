@@ -5,17 +5,19 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/FindKeyRequest.h"
+
 #include <functional>
-#include <gtest/gtest.h>
 
 #include <folly/Memory.h>
-#include "logdevice/common/FindKeyRequest.h"
-#include "logdevice/common/settings/Settings.h"
+#include <gtest/gtest.h>
+
 #include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/protocol/FINDKEY_Message.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
-#include "logdevice/common/test/MockLibeventTimer.h"
 #include "logdevice/common/test/MockNodeSetAccessor.h"
+#include "logdevice/common/test/MockTimer.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/types.h"
 
@@ -115,9 +117,9 @@ class MockNodeSetFinder : public NodeSetFinder {
       : // only read from the metadata log
         NodeSetFinder(log_id, timeout, callback, Source::METADATA_LOG) {}
 
-  std::unique_ptr<LibeventTimer>
+  std::unique_ptr<Timer>
   createJobTimer(std::function<void()> callback) override {
-    auto timer = std::make_unique<MockLibeventTimer>();
+    auto timer = std::make_unique<MockTimer>();
     timer->setCallback(std::move(callback));
     return timer;
   }
@@ -171,7 +173,7 @@ class MockFindKeyRequest : public FindKeyRequest {
     auto logs_config = std::make_shared<configuration::LocalLogsConfig>();
     logs_config->insert(
         boost::icl::right_open_interval<logid_t::raw_type>(1, 2), log);
-    config_ = ServerConfig::fromData(
+    config_ = ServerConfig::fromDataTest(
         __FILE__, std::move(nodes_config), std::move(meta_config));
 
     logs_config_ = std::move(logs_config);
@@ -203,7 +205,7 @@ class MockFindKeyRequest : public FindKeyRequest {
     auto logs_config = std::make_shared<configuration::LocalLogsConfig>();
     logs_config->insert(
         boost::icl::right_open_interval<logid_t::raw_type>(1, 2), log);
-    config_ = ServerConfig::fromData(
+    config_ = ServerConfig::fromDataTest(
         __FILE__, std::move(nodes_config), std::move(meta_config));
 
     logs_config_ = std::move(logs_config);

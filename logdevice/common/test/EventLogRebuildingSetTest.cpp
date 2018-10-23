@@ -5,13 +5,14 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/event_log/EventLogRebuildingSet.h"
+
 #include <gtest/gtest.h>
 
 #include "logdevice/common/DataRecordOwnsPayload.h"
-#include "logdevice/common/event_log/EventLogStateMachine.h"
-#include "logdevice/common/event_log/EventLogRebuildingSet.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/event_log/EventLogStateMachine.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
 #include "logdevice/common/util.h"
 
@@ -46,7 +47,7 @@ std::shared_ptr<UpdateableConfig> buildConfig() {
       createMetaDataLogsConfig(nodes_config, nodes_config.getNodes().size(), 2);
   auto config = std::make_shared<UpdateableConfig>();
   config->updateableServerConfig()->update(
-      ServerConfig::fromData(__FILE__, nodes_config, meta_config));
+      ServerConfig::fromDataTest(__FILE__, nodes_config, meta_config));
   return config;
 }
 

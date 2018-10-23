@@ -20,43 +20,7 @@ enum ProtocolVersion : uint16_t {
   //
   // Minimum version number of the protocol this version of LogDevice is
   // backward compatible with - 1
-  PROTOCOL_VERSION_LOWER_BOUND = 56,
-
-  // START_Message can specify key(s) which server can uses
-  // to filter out records.
-  SERVER_CAN_FILTER_RECORD, // == 57;
-
-  // Client can provide custom counter in APPEND_message which get aggregated
-  // on server.
-  SERVER_CUSTOM_COUNTER_SUPPORT, // == 58
-
-  // clients can send NODE_STATS_Message and nodes can send
-  // NODE_STATS_REPLY_Messages in response
-  CLIENT_SEND_NODE_STATS, // == 59
-
-  // All optional keys including FINDKEY and filterable for now
-  APPEND_WITH_OPTIONAL_KEYS, // == 60;
-
-  SHARD_ID_IN_CLEANED_PROTOCOL, // == 61;
-
-  // A rebuilding store message will include the durability of the
-  // rebuilding.
-  REBUILDING_WITHOUT_WAL_2, // ==  62;
-
-  SHARD_ID_IN_STORE_MSG, // = 63;
-
-  SHARD_ID_IN_DELETE_MSG, // = 64;
-
-  // NODE_STATS_AGGREGATE_Message for controller nodes to aggregate information
-  // from all other nodes
-  NODE_STATS_AGGREGATE, // == 65
-
-  BOYCOTT_IN_CLUSTER, // == 66
-
-  // GOSSIP_Message now includes boycott information
-  GOSSIP_WITH_BOYCOTT, // == 67
-
-  WORST_CLIENT_FOR_BOYCOTT, // == 68
+  PROTOCOL_VERSION_LOWER_BOUND = 68,
 
   // Change START to support encoding of the known down size along with the
   // vector and ignore the num_filtered_out member of the header
@@ -101,6 +65,8 @@ enum ProtocolVersion : uint16_t {
   // Support OffsetMap instead of a uint64_t for byte offset
   OFFSET_MAP_SUPPORT, // = 84
 
+  OFFSET_MAP_SUPPORT_IN_SEALED_MSG, // = 85
+
   // NOTE: insert new protocol versions here
 
   // Maximum version number of the protocol this version of LogDevice
@@ -114,18 +80,6 @@ enum ProtocolVersion : uint16_t {
   // NOTE: do not add anything below PROTOCOL_VERSION_UPPER_BOUND
 };
 
-static_assert(SERVER_CAN_FILTER_RECORD == 57, "");
-static_assert(SERVER_CUSTOM_COUNTER_SUPPORT == 58, "");
-static_assert(CLIENT_SEND_NODE_STATS == 59, "");
-static_assert(APPEND_WITH_OPTIONAL_KEYS == 60, "");
-static_assert(SHARD_ID_IN_CLEANED_PROTOCOL == 61, "");
-static_assert(REBUILDING_WITHOUT_WAL_2 == 62, "");
-static_assert(SHARD_ID_IN_STORE_MSG == 63, "");
-static_assert(SHARD_ID_IN_DELETE_MSG == 64, "");
-static_assert(NODE_STATS_AGGREGATE == 65, "");
-static_assert(BOYCOTT_IN_CLUSTER == 66, "");
-static_assert(GOSSIP_WITH_BOYCOTT == 67, "");
-static_assert(WORST_CLIENT_FOR_BOYCOTT == 68, "");
 static_assert(SUPPORT_LARGER_FILTERED_OUT_LIST == 69, "");
 static_assert(TAIL_RECORD_IN_SEALED == 70, "");
 static_assert(SHARD_ID_IN_REBUILD_METADATA == 71, "");
@@ -142,6 +96,7 @@ static_assert(CHECKSUM_SUPPORT == 81, "");
 static_assert(TAIL_RECORD_IN_GSS_REPLY == 82, "");
 static_assert(STORE_E2E_TRACING_SUPPORT == 83, "");
 static_assert(OFFSET_MAP_SUPPORT == 84, "");
+static_assert(OFFSET_MAP_SUPPORT_IN_SEALED_MSG == 85, "");
 
 constexpr uint16_t MIN_PROTOCOL_SUPPORTED = PROTOCOL_VERSION_LOWER_BOUND + 1;
 constexpr uint16_t MAX_PROTOCOL_SUPPORTED = PROTOCOL_VERSION_UPPER_BOUND - 1;

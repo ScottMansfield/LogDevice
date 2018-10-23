@@ -5,8 +5,9 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
 #include <numeric>
+
+#include <gtest/gtest.h>
 
 #include "logdevice/common/client_read_stream/ClientReadStreamScd.h"
 #include "logdevice/common/configuration/Configuration.h"
@@ -44,7 +45,8 @@ class ClientReadStreamScd_FilteredOutTest : public ::testing::Test {
     addLog(logs_config.get(), LOG_ID, replication, 0, nodeset_size, {});
 
     config_ = std::make_shared<Configuration>(
-        ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+        ServerConfig::fromDataTest(
+            "failure_domain_test", std::move(nodes_config)),
         std::move(logs_config));
   }
 

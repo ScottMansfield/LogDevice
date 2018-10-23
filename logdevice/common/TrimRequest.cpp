@@ -8,6 +8,7 @@
 #include "TrimRequest.h"
 
 #include <folly/Memory.h>
+
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/SyncSequencerRequest.h"
@@ -163,7 +164,8 @@ void TrimRequest::onLogConfigAvailable(
 }
 
 void TrimRequest::onWriteTokenCheckDone() {
-  if (Worker::settings().disable_trim_past_tail_check) {
+  if (bypass_tail_lsn_check_ ||
+      Worker::settings().disable_trim_past_tail_check) {
     // Just continue to the next stage if the feature
     // to check for a trim-past-tail is disabled
     onTrimPastTailCheckDone();

@@ -6,12 +6,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <gtest/gtest.h>
+#include "logdevice/common/OffsetMap.h"
 
 #include <cstring>
 #include <memory>
 
-#include "logdevice/common/OffsetMap.h"
+#include <gtest/gtest.h>
+
+#include "logdevice/common/debug.h"
 
 namespace {
 
@@ -33,7 +35,8 @@ TEST(OffsetMapTest, BasicSerialization) {
 
   for (int i = 0; i < n_counters; ++i) {
     OffsetMap offset_map_writer;
-    offset_map_writer.setCounter(CounterType::BYTE_OFFSET, (uint64_t)i % 10);
+    offset_map_writer.setCounter(
+        CounterType::BYTE_OFFSET, static_cast<uint64_t>(i % 10));
     counter_size[i] =
         offset_map_writer.serialize(buf1.get() + written, max_len - written);
     ASSERT_GT(counter_size[i], 0);

@@ -15,19 +15,16 @@
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/PayloadHolder.h"
 #include "logdevice/common/protocol/MUTATED_Message.h"
-#include "logdevice/common/protocol/STORE_Message.h"
 #include "logdevice/common/protocol/STORED_Message.h"
+#include "logdevice/common/protocol/STORE_Message.h"
 #include "logdevice/common/stats/PerShardHistograms.h"
 #include "logdevice/common/stats/Stats.h"
-
 #include "logdevice/server/EpochRecordCacheEntry.h"
 #include "logdevice/server/RecordCache.h"
 #include "logdevice/server/RecordCacheDisposal.h"
 #include "logdevice/server/ServerProcessor.h"
 #include "logdevice/server/ServerWorker.h"
-
 #include "logdevice/server/read_path/LogStorageStateMap.h"
-
 #include "logdevice/server/storage_tasks/PerWorkerStorageTaskQueue.h"
 #include "logdevice/server/storage_tasks/ShardedStorageThreadPool.h"
 #include "logdevice/server/storage_tasks/StorageThreadPool.h"
@@ -81,6 +78,7 @@ StoreStorageTask::StoreStorageTask(
           block_starting_lsn,
           LocalLogStoreRecordFormat::formCopySetIndexEntry(
               store_header,
+              extra_,
               copyset,
               block_starting_lsn,
               write_shard_id_in_copyset,
@@ -167,6 +165,19 @@ bool StoreStorageTask::isPreempted(Seal* preempted_by) {
       break;
   };
 
+  return false;
+}
+
+bool StoreStorageTask::isLsnBeforeTrimPoint() {
+  const auto& log_state = getLogStorageState();
+  auto trim_point = log_state.getTrimPoint();
+  // err on the side of caution
+  if (!trim_point.hasValue()) {
+    return false;
+  }
+  if (rid_.lsn() <= trim_point.value()) {
+    return true;
+  }
   return false;
 }
 

@@ -5,6 +5,8 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/EpochSequencer.h"
+
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -14,8 +16,6 @@
 
 #include "event2/buffer.h"
 #include "logdevice/common/Appender.h"
-#include "logdevice/common/EpochSequencer.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/MetaDataLogWriter.h"
 #include "logdevice/common/NoopTraceLogger.h"
 #include "logdevice/common/PassThroughCopySetManager.h"
@@ -23,13 +23,13 @@
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/Sequencer.h"
 #include "logdevice/common/TailRecord.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/libevent/compat.h"
 #include "logdevice/common/protocol/STORE_Message.h"
-
 #include "logdevice/common/request_util.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/test/TestUtil.h"
 
@@ -224,8 +224,7 @@ class MockAppender : public Appender {
                  epoch_t(0),
                  /*size=*/size_t(0)),
         retire_after_(retire_after),
-        timer_(EventLoop::onThisThread()->getEventBase(),
-               [this] { onTimerFired(); }),
+        timer_([this] { onTimerFired(); }),
         test_(test) {
     sender_ = std::make_unique<MockSender>(this);
     ++test_->stats.appender_created;
@@ -362,7 +361,7 @@ class MockAppender : public Appender {
  private:
   // retire after this duration. if zero, Appender will not automatically retire
   std::chrono::milliseconds retire_after_;
-  LibeventTimer timer_;
+  Timer timer_;
 
   std::unique_ptr<STORE_Header> store_header_;
   // Recipient of first STORE message sent.
@@ -478,7 +477,6 @@ PayloadHolder EpochSequencerTest::genPayload(bool evbuffer) {
     ProtocolWriter writer(MessageType::APPEND, evbuf, 0);
     std::string raw(payload_size_, 'c');
     writer.write(raw.data(), raw.size());
-    writer.endSerialization();
     return PayloadHolder(evbuf);
   }
 

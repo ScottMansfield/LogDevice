@@ -6,10 +6,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include "logdevice/common/protocol/SHUTDOWN_Message.h"
+
 #include "logdevice/common/Processor.h"
+#include "logdevice/common/RebuildingTypes.h"
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/Worker.h"
-#include "logdevice/common/RebuildingTypes.h"
 
 namespace facebook { namespace logdevice {
 
@@ -18,15 +19,13 @@ SHUTDOWN_Message::SHUTDOWN_Message(const SHUTDOWN_Header& header)
       header_(header) {}
 
 void SHUTDOWN_Message::serialize(ProtocolWriter& writer) const {
-  writer.write(&header_, SHUTDOWN_Header::getExpectedSize(writer.proto()));
+  writer.write(header_);
 }
 
 MessageReadResult SHUTDOWN_Message::deserialize(ProtocolReader& reader) {
-  const auto proto = reader.proto();
-
   SHUTDOWN_Header hdr;
   hdr.serverInstanceId = ServerInstanceId_INVALID;
-  reader.read(&hdr, SHUTDOWN_Header::getExpectedSize(proto));
+  reader.read(&hdr);
 
   auto m = std::make_unique<SHUTDOWN_Message>(hdr);
   return reader.resultMsg(std::move(m));
@@ -54,14 +53,6 @@ Message::Disposition SHUTDOWN_Message::onReceived(const Address& from) {
         from.asNodeID().index(), header_.serverInstanceId);
   }
   return Disposition::NORMAL;
-}
-
-size_t SHUTDOWN_Header::getExpectedSize(uint16_t proto) {
-  if (proto < Compatibility::REBUILDING_WITHOUT_WAL_2) {
-    return offsetof(SHUTDOWN_Header, serverInstanceId);
-  } else {
-    return sizeof(SHUTDOWN_Header);
-  }
 }
 
 }} // namespace facebook::logdevice

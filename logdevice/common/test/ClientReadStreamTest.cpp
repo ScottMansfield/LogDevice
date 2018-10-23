@@ -5,21 +5,22 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/common/client_read_stream/ClientReadStream.h"
 
 #include <functional>
-#include <memory>
 #include <map>
+#include <memory>
 #include <unordered_map>
 
 #include <folly/MapUtil.h>
 #include <folly/Memory.h>
+#include <gtest/gtest.h>
+
 #include "logdevice/common/DataRecordOwnsPayload.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/RebuildingTypes.h"
 #include "logdevice/common/ShardAuthoritativeStatusMap.h"
-#include "logdevice/common/client_read_stream/ClientReadStream.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/client_read_stream/ClientReadStreamBufferFactory.h"
 #include "logdevice/common/client_read_stream/ClientReadStreamConnectionHealth.h"
 #include "logdevice/common/client_read_stream/ClientReadStreamScd.h"
@@ -31,7 +32,7 @@
 #include "logdevice/common/protocol/STARTED_Message.h"
 #include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
-#include "logdevice/common/test/MockLibeventTimer.h"
+#include "logdevice/common/test/MockTimer.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/common/util.h"
@@ -331,13 +332,9 @@ class MockClientReadStreamDependencies : public ClientReadStreamDependencies {
     return std::make_unique<MockBackoffTimer>();
   }
 
-  std::unique_ptr<LibeventTimer>
-  createLibeventTimer(std::function<void()> /*cb*/ = nullptr) override {
-    return std::make_unique<MockLibeventTimer>();
-  }
-
-  const struct timeval* getZeroTimeout() override {
-    return nullptr;
+  std::unique_ptr<Timer>
+  createTimer(std::function<void()> /*cb*/ = nullptr) override {
+    return std::make_unique<MockTimer>();
   }
 
   TimeoutMap* getCommonTimeouts() override {
@@ -564,7 +561,7 @@ class ClientReadStreamTest
         nodes_config, nodes_config.getNodes().size(), 3);
 
     state_.config->updateableServerConfig()->update(
-        ServerConfig::fromData(__FILE__, nodes_config, meta_config));
+        ServerConfig::fromDataTest(__FILE__, nodes_config, meta_config));
     state_.config->updateableLogsConfig()->update(std::move(logs_config));
   }
 

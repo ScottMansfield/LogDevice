@@ -5,29 +5,27 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
-
 #include <queue>
+
 #include <folly/Memory.h>
 #include <folly/String.h>
+#include <gtest/gtest.h>
 #include <logdevice/common/CrossDomainCopySetSelector.h>
 #include <logdevice/common/LinearCopySetSelector.h>
 #include <logdevice/common/PassThroughCopySetManager.h>
 #include <logdevice/common/RebuildingTypes.h>
 #include <logdevice/common/StickyCopySetManager.h>
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/CopySetSelectorFactory.h"
 #include "logdevice/common/NodeSetSelectorFactory.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
-
-#include "logdevice/common/util.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/test/CopySetSelectorTestUtil.h"
 #include "logdevice/common/test/NodeSetStateTest.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
-
-#include "logdevice/common/debug.h"
+#include "logdevice/common/util.h"
 
 using namespace facebook::logdevice;
 using namespace facebook::logdevice::NodeSetTestUtil;
@@ -316,7 +314,8 @@ void CopySetSelectorTest::setUp() {
   addLog(logs_config.get(), LOG_ID, replication_, extras_, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("copyset_selector_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "copyset_selector_test", std::move(nodes_config)),
       std::move(logs_config));
 
   NodeID seq_node_id = NodeID(seq_node_idx_, 1);

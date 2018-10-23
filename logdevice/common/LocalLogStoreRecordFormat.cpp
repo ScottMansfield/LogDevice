@@ -8,9 +8,9 @@
 #define __STDC_FORMAT_MACROS // pull in PRIu64 etc
 #include "LocalLogStoreRecordFormat.h"
 
-#include <folly/hash/Hash.h>
 #include <folly/Range.h>
 #include <folly/Varint.h>
+#include <folly/hash/Hash.h>
 
 #include "logdevice/common/Checksum.h"
 #include "logdevice/common/CopySet.h"
@@ -23,11 +23,22 @@ namespace {
 /**
  * Returns minimum possible size for log store blob.
  */
-static constexpr size_t minLogStoreBlobSize() {
+constexpr size_t minLogStoreBlobSize() {
   return sizeof(uint64_t) + sizeof(esn_t) +
       sizeof(uint8_t) + // flags are at least 1 byte
       sizeof(copyset_size_t);
 }
+
+uint32_t getRecordWaveOrRecoveryEpoch(const STORE_Header& header,
+                                      const STORE_Extra& extra) {
+  // TODO 11866467: deprecate STORE_Header::RECOVERY
+  return (((header.flags & STORE_Header::RECOVERY ||
+            header.flags & STORE_Header::WRITTEN_BY_RECOVERY)) &&
+          (extra.recovery_epoch != EPOCH_INVALID))
+      ? extra.recovery_epoch.val_
+      : header.wave;
+}
+
 } // namespace
 
 #define APPEND_TO_STRING(pstr, thing)                                     \
@@ -35,6 +46,7 @@ static constexpr size_t minLogStoreBlobSize() {
     pstr->append(reinterpret_cast<const char*>(&(thing)), sizeof(thing)); \
   } while (0)
 
+// TODO (T33977412)
 size_t recordHeaderSizeEstimate(flags_t flags,
                                 copyset_size_t copyset_size,
                                 const Slice& optional_keys) {
@@ -56,12 +68,22 @@ size_t recordHeaderSizeEstimate(flags_t flags,
   return ret;
 }
 
+size_t recordHeaderSizeEstimate(flags_t flags,
+                                copyset_size_t copyset_size,
+                                const Slice& optional_keys,
+                                const OffsetMap& offsets_within_epoch) {
+  size_t ret = recordHeaderSizeEstimate(flags, copyset_size, optional_keys) +
+      ((flags & FLAG_OFFSET_MAP) ? offsets_within_epoch.sizeInLinearBuffer()
+                                 : 0);
+  return ret;
+}
+
 Slice formRecordHeaderBufAppend(int64_t timestamp,
                                 esn_t last_known_good,
                                 flags_t flags,
                                 uint32_t wave_or_recovery_epoch,
                                 const folly::Range<const ShardID*>& copyset,
-                                uint64_t offset_within_epoch,
+                                const OffsetMap& offsets_within_epoch,
                                 const Slice& optional_keys,
                                 std::string* buf) {
   ld_check(buf != nullptr);
@@ -75,7 +97,6 @@ Slice formRecordHeaderBufAppend(int64_t timestamp,
   buf->append((const char*)varint_buf, n);
 
   APPEND_TO_STRING(buf, wave_or_recovery_epoch);
-
   copyset_size_t copyset_size = copyset.size();
   APPEND_TO_STRING(buf, copyset_size);
   if (flags & FLAG_SHARD_ID) {
@@ -88,8 +109,11 @@ Slice formRecordHeaderBufAppend(int64_t timestamp,
       APPEND_TO_STRING(buf, nid);
     }
   }
-
+  // TODO (T33977412) : do not serialize offset_within_epoch if FLAG_OFFSET_MAP
+  // is set
   if (flags & FLAG_OFFSET_WITHIN_EPOCH) {
+    uint64_t offset_within_epoch =
+        offsets_within_epoch.getCounter(CounterType::BYTE_OFFSET);
     APPEND_TO_STRING(buf, offset_within_epoch);
   }
 
@@ -100,9 +124,41 @@ Slice formRecordHeaderBufAppend(int64_t timestamp,
     buf->append((const char*)optional_keys.data, optional_keys.size);
   }
 
+  if (flags & FLAG_OFFSET_WITHIN_EPOCH && flags & FLAG_OFFSET_MAP) {
+    ssize_t offsets_map_size = offsets_within_epoch.sizeInLinearBuffer();
+    size_t buf_size_before_offset_map = buf->size();
+    buf->resize(buf->size() + offsets_map_size, '0');
+    int rv = offsets_within_epoch.serialize(
+        (char*)buf->data() + buf_size_before_offset_map, offsets_map_size);
+    ld_check(rv != -1);
+  }
+
   return Slice(buf->data() + buf_size_prev, buf->size() - buf_size_prev);
 }
 
+// TODO (T33977412)
+Slice formRecordHeaderBufAppend(int64_t timestamp,
+                                esn_t last_known_good,
+                                flags_t flags,
+                                uint32_t wave_or_recovery_epoch,
+                                const folly::Range<const ShardID*>& copyset,
+                                uint64_t offset_within_epoch,
+                                const Slice& optional_keys,
+                                std::string* buf) {
+  OffsetMap offsets_within_epoch;
+  offsets_within_epoch.setCounter(
+      CounterType::BYTE_OFFSET, offset_within_epoch);
+  return formRecordHeaderBufAppend(timestamp,
+                                   last_known_good,
+                                   flags,
+                                   wave_or_recovery_epoch,
+                                   copyset,
+                                   offsets_within_epoch,
+                                   optional_keys,
+                                   buf);
+}
+
+// TODO (T33977412)
 Slice formRecordHeader(int64_t timestamp,
                        esn_t last_known_good,
                        flags_t flags,
@@ -111,20 +167,41 @@ Slice formRecordHeader(int64_t timestamp,
                        uint64_t offset_within_epoch,
                        const std::map<KeyType, std::string>& optional_keys,
                        std::string* buf) {
+  OffsetMap offsets_within_epoch;
+  offsets_within_epoch.setCounter(
+      CounterType::BYTE_OFFSET, offset_within_epoch);
+  return formRecordHeader(timestamp,
+                          last_known_good,
+                          flags,
+                          wave_or_recovery_epoch,
+                          copyset,
+                          offsets_within_epoch,
+                          optional_keys,
+                          buf);
+}
+
+Slice formRecordHeader(int64_t timestamp,
+                       esn_t last_known_good,
+                       flags_t flags,
+                       uint32_t wave_or_recovery_epoch,
+                       const folly::Range<const ShardID*>& copyset,
+                       OffsetMap offsets_within_epoch,
+                       const std::map<KeyType, std::string>& optional_keys,
+                       std::string* buf) {
   std::string optional_keys_string;
   serializeOptionalKeys(&optional_keys_string, optional_keys);
   Slice optional_keys_slice = Slice::fromString(optional_keys_string);
 
   ld_check(buf != nullptr);
   buf->clear();
-  buf->reserve(
-      recordHeaderSizeEstimate(flags, copyset.size(), optional_keys_slice));
+  buf->reserve(recordHeaderSizeEstimate(
+      flags, copyset.size(), optional_keys_slice, offsets_within_epoch));
   return formRecordHeaderBufAppend(timestamp,
                                    last_known_good,
                                    flags,
                                    wave_or_recovery_epoch,
                                    copyset,
-                                   offset_within_epoch,
+                                   offsets_within_epoch,
                                    optional_keys_slice,
                                    buf);
 }
@@ -136,8 +213,10 @@ Slice formRecordHeader(const STORE_Header& store_header,
                        const std::map<KeyType, std::string>& optional_keys,
                        const STORE_Extra& store_extra) {
   flags_t flags = store_header.flags & FLAG_MASK;
-  uint32_t wave_or_recovery_epoch_to_store = store_header.wave;
-  uint64_t offset_within_epoch = BYTE_OFFSET_INVALID;
+  uint32_t wave_or_recovery_epoch_to_store =
+      getRecordWaveOrRecoveryEpoch(store_header, store_extra);
+  OffsetMap offsets_within_epoch;
+
   if (shard_id_in_copyset) {
     flags |= FLAG_SHARD_ID;
   }
@@ -146,19 +225,18 @@ Slice formRecordHeader(const STORE_Header& store_header,
   }
   if (store_header.flags & STORE_Header::OFFSET_WITHIN_EPOCH) {
     flags |= FLAG_OFFSET_WITHIN_EPOCH;
-    offset_within_epoch = store_extra.offset_within_epoch;
+    offsets_within_epoch.setCounter(
+        CounterType::BYTE_OFFSET, store_extra.offset_within_epoch);
+  }
+
+  if (store_header.flags & STORE_Header::OFFSET_MAP) {
+    flags |= FLAG_OFFSET_MAP;
   }
 
   // TODO 11866467: deprecate STORE_Header::RECOVERY
   if (store_header.flags & STORE_Header::RECOVERY ||
       store_header.flags & STORE_Header::WRITTEN_BY_RECOVERY) {
     flags |= FLAG_WRITTEN_BY_RECOVERY;
-    // if available, replace wave with the recovery epoch.
-    // TODO 11866467: always use the wave value in STORE_Header once migration
-    // is done.
-    if (store_extra.recovery_epoch != EPOCH_INVALID) {
-      wave_or_recovery_epoch_to_store = store_extra.recovery_epoch.val_;
-    }
   }
 
   if ((store_header.flags & (STORE_Header::REBUILDING | STORE_Header::AMEND)) ==
@@ -183,7 +261,7 @@ Slice formRecordHeader(const STORE_Header& store_header,
                           wave_or_recovery_epoch_to_store,
                           folly::Range<const ShardID*>(
                               copyset_indexes.begin(), copyset_indexes.end()),
-                          offset_within_epoch,
+                          offsets_within_epoch,
                           optional_keys,
                           buf);
 }
@@ -192,21 +270,33 @@ csi_flags_t formCopySetIndexFlags(const STORE_Header& store_header,
                                   bool shard_id_in_copyset) {
   dd_assert((store_header.flags & STORE_Header::DRAINED) == 0,
             "A STORE with DRAINED flag should never be issued.");
-  return ((store_header.flags & STORE_Header::HOLE) ? CSI_FLAG_HOLE : 0) |
-      (shard_id_in_copyset ? CSI_FLAG_SHARD_ID : 0) |
-      (((store_header.flags &
-         (STORE_Header::REBUILDING | STORE_Header::AMEND)) ==
-        STORE_Header::REBUILDING)
-           ? CSI_FLAG_WRITTEN_BY_REBUILDING
-           : 0);
+  csi_flags_t ret = 0;
+  ret |= (store_header.flags & STORE_Header::HOLE) ? CSI_FLAG_HOLE : 0;
+  ret |= shard_id_in_copyset ? CSI_FLAG_SHARD_ID : 0;
+  ret |= ((store_header.flags &
+           (STORE_Header::REBUILDING | STORE_Header::AMEND)) ==
+          STORE_Header::REBUILDING)
+      ? CSI_FLAG_WRITTEN_BY_REBUILDING
+      : 0;
+  ret |= (store_header.flags &
+          (STORE_Header::WRITTEN_BY_RECOVERY | STORE_Header::RECOVERY))
+      ? CSI_FLAG_WRITTEN_BY_RECOVERY
+      : 0;
+  return ret;
 }
 
 csi_flags_t formCopySetIndexFlags(const flags_t flags) {
-  return ((flags & FLAG_HOLE) ? CSI_FLAG_HOLE : 0) |
-      ((flags & FLAG_DRAINED) ? CSI_FLAG_DRAINED : 0) |
-      ((flags & FLAG_SHARD_ID) ? CSI_FLAG_SHARD_ID : 0) |
-      ((flags & FLAG_WRITTEN_BY_REBUILDING) ? CSI_FLAG_WRITTEN_BY_REBUILDING
-                                            : 0);
+#define CONV(x) ((flags & FLAG_##x) ? CSI_FLAG_##x : 0)
+  return CONV(HOLE) | CONV(DRAINED) | CONV(SHARD_ID) |
+      CONV(WRITTEN_BY_REBUILDING) | CONV(WRITTEN_BY_RECOVERY);
+#undef CONV
+}
+
+flags_t copySetIndexFlagsToRecordFlags(csi_flags_t flags) {
+#define CONV(x) ((flags & CSI_FLAG_##x) ? FLAG_##x : 0)
+  return CONV(HOLE) | CONV(DRAINED) | CONV(SHARD_ID) |
+      CONV(WRITTEN_BY_REBUILDING) | CONV(WRITTEN_BY_RECOVERY);
+#undef CONV
 }
 
 Slice formCopySetIndexEntry(uint32_t wave,
@@ -254,10 +344,12 @@ Slice formCopySetIndexEntry(uint32_t wave,
 #undef APPEND_TO_STRING
 
 Slice formCopySetIndexEntry(const STORE_Header& store_header,
+                            const STORE_Extra& store_extra,
                             const StoreChainLink* chainlink,
                             const folly::Optional<lsn_t>& block_starting_lsn,
                             bool shard_id_in_copyset,
                             std::string* buf) {
+  uint32_t wave = getRecordWaveOrRecoveryEpoch(store_header, store_extra);
   csi_flags_t flags = formCopySetIndexFlags(store_header, shard_id_in_copyset);
 
   if (shard_id_in_copyset) {
@@ -268,7 +360,7 @@ Slice formCopySetIndexEntry(const STORE_Header& store_header,
   for (int i = 0; i < store_header.copyset_size; ++i) {
     copyset.push_back(chainlink[i].destination);
   }
-  return formCopySetIndexEntry(store_header.wave,
+  return formCopySetIndexEntry(wave,
                                copyset.data(),
                                store_header.copyset_size,
                                block_starting_lsn,
@@ -303,9 +395,9 @@ int parseOffsetWithinEpochValue(uint64_t* offset_within_epoch_out,
     err = E::MALFORMED_RECORD;
     return -1;
   }
-  if (offset_within_epoch_out != nullptr) {
-    memcpy(offset_within_epoch_out, *ptr, sizeof(*offset_within_epoch_out));
-  }
+
+  memcpy(offset_within_epoch_out, *ptr, sizeof(*offset_within_epoch_out));
+
   *ptr += sizeof(*offset_within_epoch_out);
   return 0;
 }
@@ -391,6 +483,7 @@ bool parseCopySetIndexSingleEntry(const Slice& cs_dir_slice,
 
 #undef READ_FROM_SLICE
 
+// TODO (T33977412)
 int parse(const Slice& log_store_blob,
           std::chrono::milliseconds* timestamp_out,
           esn_t* last_known_good_out,
@@ -400,6 +493,34 @@ int parse(const Slice& log_store_blob,
           ShardID* copyset_arr_out,
           size_t copyset_arr_out_size,
           uint64_t* offset_within_epoch_out,
+          std::map<KeyType, std::string>* optional_keys,
+          Payload* payload_out,
+          shard_index_t this_shard) {
+  return parse(log_store_blob,
+               timestamp_out,
+               last_known_good_out,
+               flags_out,
+               wave_or_recovery_epoch_out,
+               copyset_size_out,
+               copyset_arr_out,
+               copyset_arr_out_size,
+               offset_within_epoch_out,
+               nullptr,
+               optional_keys,
+               payload_out,
+               this_shard);
+}
+
+int parse(const Slice& log_store_blob,
+          std::chrono::milliseconds* timestamp_out,
+          esn_t* last_known_good_out,
+          flags_t* flags_out,
+          uint32_t* wave_or_recovery_epoch_out,
+          copyset_size_t* copyset_size_out,
+          ShardID* copyset_arr_out,
+          size_t copyset_arr_out_size,
+          uint64_t* offset_within_epoch_out,
+          OffsetMap* offsets_within_epoch_out,
           std::map<KeyType, std::string>* optional_keys,
           Payload* payload_out,
           shard_index_t this_shard) {
@@ -554,9 +675,18 @@ int parse(const Slice& log_store_blob,
   // Offset within epoch (if FLAG_OFFSET_WITHIN_EPOCH was set)
   //
   if (flags & FLAG_OFFSET_WITHIN_EPOCH) {
-    rv = parseOffsetWithinEpochValue(offset_within_epoch_out, &ptr, end);
+    uint64_t out;
+    rv = parseOffsetWithinEpochValue(&out, &ptr, end);
     if (rv != 0) {
       return rv;
+    }
+    if (offset_within_epoch_out) {
+      *offset_within_epoch_out = out;
+    }
+    if (offsets_within_epoch_out) {
+      OffsetMap o;
+      o.setCounter(CounterType::BYTE_OFFSET, out);
+      *offsets_within_epoch_out = std::move(o);
     }
   }
 
@@ -655,6 +785,25 @@ int parse(const Slice& log_store_blob,
       }
       ptr += blob_size;
     }
+  }
+
+  //
+  // OffsetMap
+  //
+  if (flags & FLAG_OFFSET_WITHIN_EPOCH && flags & FLAG_OFFSET_MAP) {
+    OffsetMap out;
+    rv = out.deserialize(Slice(ptr, end - ptr));
+    if (rv == -1) {
+      return rv;
+    }
+    if (offset_within_epoch_out != nullptr) {
+      ld_check(*offset_within_epoch_out ==
+               out.getCounter(CounterType::BYTE_OFFSET));
+    }
+    if (offsets_within_epoch_out != nullptr) {
+      *offsets_within_epoch_out = std::move(out);
+    }
+    ptr += rv;
   }
 
   //
@@ -922,6 +1071,7 @@ std::string flagsToString(flags_t flags) {
   FLAG(OPTIONAL_KEYS)
   FLAG(DRAINED)
   FLAG(SHARD_ID)
+  FLAG(OFFSET_MAP)
 
 #undef FLAG
 

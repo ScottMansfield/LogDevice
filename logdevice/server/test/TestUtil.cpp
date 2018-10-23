@@ -7,17 +7,19 @@
  */
 
 #include "TestUtil.h"
+
 #include "logdevice/common/EventLoopHandle.h"
-#include "logdevice/common/settings/GossipSettings.h"
 #include "logdevice/common/NoopTraceLogger.h"
 #include "logdevice/common/SequencerLocator.h"
 #include "logdevice/common/admin/AdminServer.h"
+#include "logdevice/common/settings/GossipSettings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/common/settings/util.h"
+#include "logdevice/common/test/TestUtil.h"
 #include "logdevice/server/LogStoreMonitor.h"
-#include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/RebuildingCoordinator.h"
 #include "logdevice/server/RebuildingSupervisor.h"
+#include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/ServerProcessor.h"
 #include "logdevice/server/locallogstore/ShardedRocksDBLocalLogStore.h"
 #include "logdevice/server/shutdown.h"
@@ -56,7 +58,8 @@ std::shared_ptr<ServerProcessor> make_test_server_processor(
       UpdateableSettings<Settings>(settings),
       stats,
       nullptr,
-      make_test_server_plugin_pack());
+      make_test_server_plugin_pack(),
+      make_test_plugin_registry());
 }
 
 std::shared_ptr<ServerProcessor> make_test_server_processor(

@@ -21,8 +21,8 @@
 #include "logdevice/common/ExponentialBackoffTimer.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/SimpleEnumMap.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/buffered_writer/BufferedWriteDecoderImpl.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/BufferedWriter.h"
 
 class ProcessorTestProxy;
@@ -44,7 +44,7 @@ namespace facebook { namespace logdevice {
 
 class BufferedWriterShard;
 class ExponentialBackoffTimer;
-class LibeventTimer;
+class Timer;
 class StatsHolder;
 class Processor;
 
@@ -277,7 +277,7 @@ class BufferedWriterSingleLog {
   logid_t log_id_;
   GetLogOptionsFunc get_log_options_;
   CompactableContainer<std::deque<std::unique_ptr<Batch>>> batches_;
-  std::unique_ptr<LibeventTimer> time_trigger_timer_;
+  std::unique_ptr<Timer> time_trigger_timer_;
 
   // In the ONE_AT_A_TIME mode, this is a buffer for appends that came in
   // while a batch was already inflight.  When that batch finishes, we can

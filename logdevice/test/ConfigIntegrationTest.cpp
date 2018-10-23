@@ -16,15 +16,16 @@
 #include "logdevice/common/EpochStore.h"
 #include "logdevice/common/FileEpochStore.h"
 #include "logdevice/common/NodeSetSelectorFactory.h"
-#include "logdevice/common/stats/Stats.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
-#include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/configuration/InternalLogs.h"
+#include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/hash.h"
-#include "logdevice/lib/ClientPluginPack.h"
+#include "logdevice/common/stats/Stats.h"
 #include "logdevice/include/Client.h"
 #include "logdevice/include/ConfigSubscriptionHandle.h"
+#include "logdevice/lib/ClientBuiltinPluginProvider.h"
 #include "logdevice/lib/ClientImpl.h"
+#include "logdevice/lib/ClientPluginPack.h"
 #include "logdevice/lib/RemoteLogsConfig.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
 #include "logdevice/test/utils/IntegrationTestUtils.h"
@@ -770,7 +771,9 @@ TEST_F(ConfigIntegrationTest, ExpandWithVersionUpdate) {
       std::make_shared<UpdateableConfig>(
           std::make_shared<UpdateableServerConfig>(
               cluster_config->serverConfig()->copy()),
-          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()));
+          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()),
+          std::make_shared<UpdateableZookeeperConfig>(
+              cluster_config->zookeeperConfig()));
 
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-config-synchronization", true));
@@ -780,6 +783,8 @@ TEST_F(ConfigIntegrationTest, ExpandWithVersionUpdate) {
   // Creating a client through instantiating an instance of ClientImpl directly
   // makes it ignore the settings in the config, so we have to set this here
   ASSERT_EQ(0, client_settings->set("enable-logsconfig-manager", "false"));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -787,7 +792,7 @@ TEST_F(ConfigIntegrationTest, ExpandWithVersionUpdate) {
       "",
       getDefaultTestTimeout(),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   std::string old_hash =
@@ -866,7 +871,9 @@ TEST_F(ConfigIntegrationTest, ConfigSyncAfterReconnect) {
   std::shared_ptr<UpdateableConfig> client_config =
       std::make_shared<UpdateableConfig>(
           std::make_shared<UpdateableServerConfig>(new_server_config->copy()),
-          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()));
+          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()),
+          std::make_shared<UpdateableZookeeperConfig>(
+              cluster_config->zookeeperConfig()));
 
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-config-synchronization", true));
@@ -876,6 +883,8 @@ TEST_F(ConfigIntegrationTest, ConfigSyncAfterReconnect) {
   // Creating a client through instantiating an instance of ClientImpl directly
   // makes it ignore the settings in the config, so we have to set this here
   ASSERT_EQ(0, client_settings->set("enable-logsconfig-manager", "false"));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -883,7 +892,7 @@ TEST_F(ConfigIntegrationTest, ConfigSyncAfterReconnect) {
       "",
       getDefaultTestTimeout(),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   std::string old_hash =
@@ -968,13 +977,17 @@ TEST_F(ConfigIntegrationTest, ExpandWithoutVersionUpdate) {
       std::make_shared<UpdateableConfig>(
           std::make_shared<UpdateableServerConfig>(
               cluster_config->serverConfig()->copy()),
-          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()));
+          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()),
+          std::make_shared<UpdateableZookeeperConfig>(
+              cluster_config->zookeeperConfig()));
 
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-config-synchronization", true));
   // Creating a client through instantiating an instance of ClientImpl directly
   // makes it ignore the settings in the config, so we have to set this here
   ASSERT_EQ(0, client_settings->set("enable-logsconfig-manager", "false"));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -982,7 +995,7 @@ TEST_F(ConfigIntegrationTest, ExpandWithoutVersionUpdate) {
       "",
       std::chrono::seconds(1),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   // Expand the cluster by one node without updating the config version
@@ -1035,6 +1048,8 @@ TEST_F(ConfigIntegrationTest, MetaDataLog) {
   // makes it ignore the settings in the config, so we have to set this here
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-logsconfig-manager", "false"));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -1042,7 +1057,7 @@ TEST_F(ConfigIntegrationTest, MetaDataLog) {
       "",
       this->testTimeout(),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
   auto client_impl = static_cast<ClientImpl*>(client.get());
   auto config = client_impl->getConfig()->get();

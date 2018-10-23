@@ -5,27 +5,29 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <arpa/inet.h>
-#include <gtest/gtest.h>
+#include "logdevice/common/configuration/Configuration.h"
+
 #include <memory>
-#include <netinet/in.h>
 #include <string>
 
+#include <arpa/inet.h>
+#include <folly/FBString.h>
 #include <folly/dynamic.h>
 #include <folly/json.h>
 #include <folly/test/JsonTestUtil.h>
-#include <folly/FBString.h>
-#include "logdevice/include/Err.h"
-#include "logdevice/include/types.h"
-#include "logdevice/common/configuration/ParsingHelpers.h"
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/configuration/LocalLogsConfig.h"
-#include "logdevice/common/configuration/logs/LogsConfigTree.h"
+#include <gtest/gtest.h>
+#include <netinet/in.h>
+
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/Semaphore.h"
+#include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/ParsingHelpers.h"
+#include "logdevice/common/configuration/logs/LogsConfigTree.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/common/types_internal.h"
-#include "logdevice/common/debug.h"
+#include "logdevice/include/Err.h"
+#include "logdevice/include/types.h"
 
 // NOTE: file reading assumes the test is being run from the top-level fbcode
 // dir
@@ -411,7 +413,6 @@ TEST(ConfigurationTest, SimpleValid) {
     EXPECT_EQ("ash.ash2.07.a.b", node.locationStr());
   }
 
-  EXPECT_EQ(nullptr, config->getLogGroupByIDRaw(logid_t(7)));
   EXPECT_EQ(nullptr, config->getLogGroupByIDShared(logid_t(7)));
   EXPECT_FALSE(config->logsConfig()->logExists(logid_t(7)));
   {
@@ -427,7 +428,8 @@ TEST(ConfigurationTest, SimpleValid) {
     EXPECT_EQ(nullptr, async_log_cfg);
   }
 
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid_t(3));
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid_t(3));
   EXPECT_TRUE(log);
   auto log_shared = config->getLogGroupByIDShared(logid_t(3));
   ASSERT_NE(log, nullptr);
@@ -556,13 +558,14 @@ TEST(ConfigurationTest, SimpleValid) {
     EXPECT_EQ(NodeSetSelectorType::SELECT_ALL, ml_conf.nodeset_selector_type);
   }
 
+  ASSERT_NE(nullptr, config->zookeeperConfig());
   const std::string zookeeper_quorum =
-      config->serverConfig()->getZookeeperQuorumString();
+      config->zookeeperConfig()->getQuorumString();
 
   EXPECT_EQ(zookeeper_quorum, "1.2.3.4:2181,5.6.7.8:2181,9.10.11.12:2181");
 
   const std::chrono::milliseconds zookeeper_timeout =
-      config->serverConfig()->getZookeeperTimeout();
+      config->zookeeperConfig()->getSessionTimeout();
 
   EXPECT_EQ(zookeeper_timeout, std::chrono::milliseconds(30000));
   EXPECT_NE(config->serverConfig()->getCustomFields(), nullptr);
@@ -956,7 +959,7 @@ TEST(ConfigurationTest, Defaults) {
       Configuration::fromJsonFile(TEST_CONFIG_FILE("defaults.conf")));
 
   ASSERT_NE(nullptr, config);
-  const LogsConfig::LogGroupNode* log;
+  std::shared_ptr<LogsConfig::LogGroupNode> log;
 
   // rate with no default override in cfg at all
   ASSERT_FALSE(config->serverConfig()
@@ -964,7 +967,7 @@ TEST(ConfigurationTest, Defaults) {
                    .hasValue());
   EXPECT_DOUBLE_EQ(0.1, config->serverConfig()->getDefaultSamplePercentage());
 
-  log = config->getLogGroupByIDRaw(logid_t(1));
+  log = config->getLogGroupByIDShared(logid_t(1));
   ASSERT_NE(nullptr, log);
   const auto& attrs = log->attrs();
   ASSERT_TRUE(config->logsConfig()->logExists(logid_t(1)));
@@ -983,13 +986,13 @@ TEST(ConfigurationTest, Defaults) {
   EXPECT_EQ(91, range.first.val_);
   EXPECT_EQ(9911, range.second.val_);
 
-  log = config->getLogGroupByIDRaw(logid_t(2));
+  log = config->getLogGroupByIDShared(logid_t(2));
   const auto& attrs2 = log->attrs();
   EXPECT_TRUE(attrs2.backlogDuration().value().hasValue());
   EXPECT_EQ(std::chrono::seconds(3600 * 24 * 4),
             attrs2.backlogDuration().value().value());
 
-  log = config->getLogGroupByIDRaw(logid_t(500));
+  log = config->getLogGroupByIDShared(logid_t(500));
   const auto& attrs3 = log->attrs();
   EXPECT_EQ(3, *attrs3.replicationFactor());
   EXPECT_EQ(0, *attrs3.extraCopies());
@@ -1695,13 +1698,14 @@ TEST(ConfigurationTest, CustomFields) {
       Configuration::fromJsonFile(TEST_CONFIG_FILE("custom_fields.conf")));
   ASSERT_NE(nullptr, config);
 
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid_t(1));
+  std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid_t(1));
   ASSERT_NE(nullptr, log);
   ASSERT_EQ(1, log->attrs().extras().value().size());
 
   ASSERT_EQ("custom_value", log->attrs().extras().value().at("custom_key"));
 
-  log = config->getLogGroupByIDRaw(logid_t(2));
+  log = config->getLogGroupByIDShared(logid_t(2));
   ASSERT_NE(nullptr, log);
   ASSERT_EQ(1, log->attrs().extras().value().size());
   ASSERT_EQ("default_value", log->attrs().extras().value().at("custom_key"));
@@ -1816,7 +1820,8 @@ TEST(ConfigurationTest, SecurityAndPermissionInfo) {
             config->serverConfig()->getPermissionCheckerType());
 
   ASSERT_TRUE(config->logsConfig()->logExists(logid_t(1)));
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid_t(1));
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid_t(1));
   ASSERT_NE(nullptr, log);
   const auto& permissions = log->attrs().permissions().value();
 
@@ -1857,8 +1862,8 @@ TEST(ConfigurationTest, SecurityAndPermissionInfo) {
   // check that for logs that did not set any permissions, default permissions
   // propergate to them
   ASSERT_TRUE(config->logsConfig()->logExists(logid_t(11)));
-  const LogsConfig::LogGroupNode* log2 =
-      config->getLogGroupByIDRaw(logid_t(11));
+  const std::shared_ptr<LogsConfig::LogGroupNode> log2 =
+      config->getLogGroupByIDShared(logid_t(11));
   ASSERT_NE(nullptr, log2);
 
   const auto& permissions2 = log2->attrs().permissions().value();
@@ -2266,7 +2271,8 @@ TEST(ConfigurationTest, ACLS) {
   std::shared_ptr<Configuration> config(Configuration::fromJsonFile(
       TEST_CONFIG_FILE("conf_permission_acl_test.conf")));
   ASSERT_NE(nullptr, config);
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid_t(1));
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid_t(1));
   ASSERT_NE(log, nullptr);
   const Configuration::LogAttributes& log_attrs = log->attrs();
 
@@ -2286,7 +2292,8 @@ TEST(ConfigurationTest, SequencerAffinity) {
   std::shared_ptr<Configuration> config = Configuration::fromJsonFile(
       TEST_CONFIG_FILE("sequencer_affinity_2nodes.conf"));
   ASSERT_NE(config, nullptr);
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid_t(1));
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid_t(1));
   ASSERT_NE(log, nullptr);
   const Configuration::LogAttributes& log_attrs = log->attrs();
   ASSERT_TRUE(log_attrs.sequencerAffinity().hasValue());

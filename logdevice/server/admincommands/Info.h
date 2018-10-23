@@ -7,9 +7,10 @@
  */
 #pragma once
 
+#include <time.h>
+
 #include <folly/String.h>
 #include <folly/json.h>
-#include <time.h>
 
 #include "logdevice/common/AdminCommandTable.h"
 #include "logdevice/common/PermissionChecker.h"
@@ -17,8 +18,8 @@
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/UpdateableSecurityInfo.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/AdminCommand.h"
+#include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/util.h"
 
 namespace facebook { namespace logdevice { namespace commands {
@@ -98,8 +99,9 @@ class Info : public AdminCommand {
 
     auto processor = server_->getProcessor();
     auto config = processor->config_;
-    std::unique_ptr<BuildInfo> build_info =
-        processor->getPlugin()->createBuildInfo();
+    auto build_info =
+        processor->getPluginRegistry()->getSinglePlugin<BuildInfo>(
+            PluginType::BUILD_INFO);
 
     const auto& security_info = processor->security_info_;
     auto permission_checker = security_info->getPermissionChecker();

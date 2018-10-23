@@ -12,17 +12,17 @@
 
 #include "logdevice/common/AdminCommandTable-fwd.h"
 #include "logdevice/common/BackoffTimer.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/ExponentialBackoffTimer.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/RebuildingTypes.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/event_log/EventLogStateMachine.h"
 #include "logdevice/common/event_log/EventLogWriter.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/types.h"
-#include "logdevice/server/rebuilding/RebuildingPlanner.h"
 #include "logdevice/server/rebuilding/NonAuthoritativeRebuildingChecker.h"
+#include "logdevice/server/rebuilding/RebuildingPlanner.h"
 
 /**
  * @file RebuildingCoordinator coordinates all LogRebuilding state machines.
@@ -476,7 +476,7 @@ class RebuildingCoordinator : public RebuildingPlanner::Listener,
    */
   std::unordered_map<uint32_t, ShardState> shardsRebuilding_;
 
-  std::vector<std::unique_ptr<LibeventTimer>> scheduledRestarts_;
+  std::vector<std::unique_ptr<Timer>> scheduledRestarts_;
 
   /**
    * Cache of RebuildingRangesMetadata fully populated at startup. Ranges

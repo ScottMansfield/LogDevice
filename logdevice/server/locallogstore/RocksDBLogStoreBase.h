@@ -9,14 +9,13 @@
 #include <atomic>
 
 #include <boost/noncopyable.hpp>
-
 #include <rocksdb/db.h>
 #include <rocksdb/iterator.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/statistics.h>
 
-#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/server/IOFaultInjection.h"
 #include "logdevice/server/locallogstore/LocalLogStore.h"
@@ -339,6 +338,10 @@ class RocksDBLogStoreBase : public LocalLogStore {
 
   virtual void onSettingsUpdated(
       const std::shared_ptr<const RocksDBSettings> /* unused */) {}
+
+  static size_t getIOBytesUnnormalized() {
+    return ROCKSDB_PERF_CONTEXT()->block_read_byte;
+  }
 
  protected:
   /**

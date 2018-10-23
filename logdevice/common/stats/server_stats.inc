@@ -18,6 +18,8 @@ STAT_DEFINE(read_requests, SUM)
 STAT_DEFINE(read_requests_to_storage, SUM)
 // Number of epoch offset request that got kicked to storage threads
 STAT_DEFINE(epoch_offset_to_storage, SUM)
+// Number of records not written to RocksDB because their LSN <= trim point
+STAT_DEFINE(skipped_record_lsn_before_trim_point, SUM)
 // Number of write ops of all types submitted to the storage thread pool
 STAT_DEFINE(write_ops, SUM)
 // Number of multi-write requests passed to the local log store (RocksDB)
@@ -390,16 +392,6 @@ STAT_DEFINE(storage_tasks_dequeued_fast_stallable, SUM)
 STAT_DEFINE(storage_tasks_dequeued_slow, SUM)
 STAT_DEFINE(storage_tasks_dequeued_metadata, SUM)
 
-// Number of calls to postRequest
-STAT_DEFINE(post_request_total, SUM)
-// Number of postRequest failures.
-STAT_DEFINE(post_request_failed, SUM)
-// Number of Requests executed on Worker threads.
-STAT_DEFINE(worker_requests_executed, SUM)
-// Number of Requests > request_execution_delay_threshold in execute().
-STAT_DEFINE(worker_slow_requests, SUM)
-// Number of tasks on background thread that spent > 10 msec executing.
-STAT_DEFINE(background_slow_requests, SUM)
 // Number of failures forwarding a message in the delivery chain
 STAT_DEFINE(store_forwarding_failed, SUM)
 
@@ -627,6 +619,8 @@ STAT_DEFINE(read_streams_num_records_read, SUM)
 STAT_DEFINE(read_streams_num_bytes_read, SUM)
 STAT_DEFINE(read_streams_num_record_bytes_read, SUM)
 STAT_DEFINE(read_streams_num_csi_bytes_read, SUM)
+// Total size of rocksdb blocks read from disk by LocalLogStoreReader.
+STAT_DEFINE(read_streams_block_bytes_read, SUM)
 
 // Total number of records filtered by LocalLogStoreReader for all read streams.
 STAT_DEFINE(read_streams_num_records_filtered, SUM)
@@ -666,11 +660,15 @@ STAT_DEFINE(real_time_record_buffer_eviction, SUM)
 
 // Number of sent records that came real time, i.e. on release were sent from
 // the writer to the reader, and never read from RocksDB.
-STAT_DEFINE(real_time_records_real_time, SUM)
+STAT_DEFINE(read_streams_records_real_time, SUM)
 // Number of sent records that were read from RocksDB using non blocking reads.
-STAT_DEFINE(real_time_records_non_blocking, SUM)
+STAT_DEFINE(read_streams_records_non_blocking, SUM)
 // Number of sent records that came from blocking reads of RocksDB.
-STAT_DEFINE(real_time_records_blocking, SUM)
+STAT_DEFINE(read_streams_records_blocking, SUM)
+// Same but in bytes.
+STAT_DEFINE(read_streams_bytes_real_time, SUM)
+STAT_DEFINE(read_streams_bytes_non_blocking, SUM)
+STAT_DEFINE(read_streams_bytes_blocking, SUM)
 
 // Number of times the previous record sent did NOT come from the real time
 // buffer, and the current record is from it.
@@ -701,7 +699,7 @@ STAT_DEFINE(real_time_too_new_regular, SUM)
 #define ITERATOR_OP_STATS(op) \
 STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _reads, SUM) \
 STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _reads_from_disk, SUM) \
-STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _blocks_read_from_disk, SUM) \
+STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _block_bytes_read_from_disk, SUM) \
 STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _reads_from_block_cache, SUM) \
 STAT_DEFINE(read_streams_rocksdb_locallogstore_ ## op ## _blocks_read_from_block_cache, SUM) \
 
@@ -985,6 +983,8 @@ STAT_DEFINE(logsconfig_api_requests_failed, SUM)
 STAT_DEFINE(logsconfig_api_reply_payload_size, MAX)
 // Messages that had a big payload that was too big and were dropped
 STAT_DEFINE(logsconfig_api_response_toobig, SUM)
+// Size of the logsconfig snapshot record
+STAT_DEFINE(logsconfig_snapshot_size, MAX)
 
 // the amount of boycotts active by a controller
 STAT_DEFINE(boycotts_by_controller_active, SUM)
@@ -997,6 +997,9 @@ STAT_DEFINE(append_success_outliers_active, SUM)
 
 // Event log RSM snapshotting errors
 STAT_DEFINE(eventlog_snapshotting_errors, SUM)
+
+// Size of the event log snapshot
+STAT_DEFINE(eventlog_snapshot_size, MAX)
 
 /*
  * The following stats will not be reset by Stats::reset() and the 'reset'
@@ -1022,7 +1025,6 @@ STAT_DEFINE(read_storage_tasks_delayed, SUM)
 STAT_DEFINE(recovery_enqueued, SUM)
 
 // Stats for rebuilding
-STAT_DEFINE(rebuilding_read_storage_tasks_allocated_records_bytes, SUM)
 STAT_DEFINE(num_in_flight_rebuilding_read_storage_tasks, SUM)
 STAT_DEFINE(num_logs_rebuilding, SUM)
 STAT_DEFINE(log_rebuilding_stall_timer_expired, SUM)
@@ -1103,15 +1105,8 @@ STAT_DEFINE(read_streams_total_known_down_size, SUM)
 // Number of ServerReadStreams that see themselves in the SCD known down list.
 STAT_DEFINE(read_streams_total_self_in_known_down, SUM)
 
-
-// Set to 1 once the node received valid config. It also resets to 0 if a bad
-// config is received, so this is really the validity of the most recent config
-// received.
-STAT_DEFINE(last_config_valid, SUM)
 // Counts config updates
 STAT_DEFINE(updated_config, SUM)
-// Config update rejected by a hook
-STAT_DEFINE(config_update_invalid, SUM)
 // Counts config updates ignored because their version is older than the
 // running config
 STAT_DEFINE(config_update_old_version, SUM)

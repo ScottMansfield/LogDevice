@@ -13,32 +13,32 @@
 #include <vector>
 
 #include <folly/DynamicConverter.h>
-#include <folly/json.h>
 #include <folly/Random.h>
 #include <folly/ScopeGuard.h>
+#include <folly/json.h>
 #include <folly/small_vector.h>
 
 #include "event2/event.h"
 #include "logdevice/common/ClientIdxAllocator.h"
 #include "logdevice/common/ConstructorFailed.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/EventHandler.h"
 #include "logdevice/common/FlowGroup.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/ResourceBudget.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/Socket.h"
 #include "logdevice/common/SocketCallback.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/configuration/TrafficShapingConfig.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/libevent/compat.h"
 #include "logdevice/common/protocol/CONFIG_ADVISORY_Message.h"
 #include "logdevice/common/protocol/CONFIG_CHANGED_Message.h"
 #include "logdevice/common/protocol/Message.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/ServerHistograms.h"
 #include "logdevice/common/stats/Stats.h"
+#include "logdevice/common/util.h"
 
 namespace facebook { namespace logdevice {
 
@@ -378,8 +378,14 @@ int Sender::notifyPeerConfigUpdated(Socket& sock) {
         CONFIG_CHANGED_Header::ConfigType::MAIN_CONFIG,
         CONFIG_CHANGED_Header::Action::UPDATE};
     metadata.hash.copy(hdr.hash, sizeof hdr.hash);
+
+    // We still send the Zookeeper section for backwards compatibility on
+    // older servers, but on newer servers this is ignored
+    // Clients already ignore / don't use the Zookeeper section
+    // TODO deprecate in T32793726
+    auto zk_config = Worker::onThisThread()->getZookeeperConfig();
     msg = std::make_unique<CONFIG_CHANGED_Message>(
-        hdr, server_config->toString(nullptr, true));
+        hdr, server_config->toString(nullptr, zk_config.get(), true));
   } else {
     // The peer is a server. Send a CONFIG_ADVISORY to let it know about our
     // config version. Upon receiving this message, if the server config hasn't
@@ -654,7 +660,7 @@ void Sender::runFlowGroups(RunType /*rt*/) {
       STAT_INCR(Worker::stats(), flow_groups_run_deadline_exceeded);
       flow_groups_run_requested_time_ = SteadyTimestamp::now();
       evtimer_add(flow_groups_run_deadline_exceeded_,
-                  Worker::onThisThread()->zero_timeout_);
+                  EventLoop::onThisThread()->zero_timeout_);
       break;
     }
   }

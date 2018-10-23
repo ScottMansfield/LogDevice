@@ -5,13 +5,13 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/common/DomainIsolationChecker.h"
 
 #include <folly/Memory.h>
+#include <gtest/gtest.h>
 
-#include "logdevice/common/DomainIsolationChecker.h"
-#include "logdevice/common/test/NodeSetTestUtil.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/test/NodeSetTestUtil.h"
 
 using namespace facebook::logdevice;
 using namespace facebook::logdevice::NodeSetTestUtil;
@@ -85,8 +85,8 @@ void DomainIsolationTest::setUp(
   Configuration::NodesConfig nodes_config(std::move(nodes));
   // auto logs_config = std::make_unique<configuration::LocalLogsConfig>();
   // addLog(logs_config.get(), logid_t(1), 1, 0, 2, {});
-  config_ =
-      ServerConfig::fromData("copyset_selector_test", std::move(nodes_config));
+  config_ = ServerConfig::fromDataTest(
+      "copyset_selector_test", std::move(nodes_config));
   config_->setMyNodeID(NodeID(my_node_idx_, 1));
   checker_ = std::make_unique<MockDomainIsolationChecker>(this);
   checker_->init();

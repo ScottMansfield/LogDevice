@@ -14,10 +14,10 @@
 #include <folly/Memory.h>
 
 #include "logdevice/common/AdminCommandTable.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/Sender.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/configuration/ServerConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/RECORD_Message.h"
 #include "logdevice/common/protocol/RELEASE_Message.h"
 #include "logdevice/common/protocol/SHARD_STATUS_UPDATE_Message.h"
@@ -813,7 +813,7 @@ void AllServerReadStreams::scheduleShardStatusUpdateRetry(ClientID cid) {
 
   if (!it->second.timer_) {
     auto timer = std::make_unique<ExponentialBackoffTimer>(
-        EventLoop::onThisThread()->getEventBase(),
+
         [this, cid]() { sendShardStatusToClient(cid); },
         std::chrono::milliseconds(1),
         std::chrono::seconds(10));

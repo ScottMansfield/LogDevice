@@ -5,26 +5,28 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/common/Processor.h"
+
 #include <map>
 #include <memory>
 #include <mutex>
 #include <pthread.h>
-#include <sys/types.h>
 #include <thread>
 #include <vector>
 
 #include <folly/Memory.h>
-#include "logdevice/common/debug.h"
+#include <gtest/gtest.h>
+#include <sys/types.h>
+
 #include "logdevice/common/EventLoopHandle.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/ExponentialBackoffTimer.h"
+#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NoopTraceLogger.h"
-#include "logdevice/common/Processor.h"
 #include "logdevice/common/Request.h"
+#include "logdevice/common/Worker.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/common/types_internal.h"
-#include "logdevice/common/Worker.h"
 
 using namespace facebook::logdevice;
 
@@ -233,35 +235,5 @@ TEST_F(ProcessorTest, UseEventLoopDirectly) {
     ASSERT_EQ(0, handle.blockingRequest(rq));
   }
   sem2.wait();
-  EXPECT_EQ(0, sem2.value());
-
-  ExponentialBackoffTimer etimer;
-  {
-    std::unique_ptr<Request> rq = std::make_unique<Req>([&] {
-      etimer.assign(handle.get()->getEventBase(),
-                    [&] { sem2.post(); },
-                    std::chrono::milliseconds(1),
-                    std::chrono::milliseconds(2));
-      etimer.activate();
-      EXPECT_TRUE(etimer.isActive());
-    });
-    ASSERT_EQ(0, handle.blockingRequest(rq));
-  }
-  sem2.wait();
-  EXPECT_EQ(0, sem2.value());
-
-  {
-    std::unique_ptr<Request> rq = std::make_unique<Req>([&] {
-      EXPECT_FALSE(etimer.isActive());
-      etimer.activate();
-      EXPECT_TRUE(etimer.isActive());
-    });
-    ASSERT_EQ(0, handle.blockingRequest(rq));
-  }
-  sem2.wait();
-
-  // Check that all the post()s were followed by wait().
-  /* sleep override */
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
   EXPECT_EQ(0, sem2.value());
 }

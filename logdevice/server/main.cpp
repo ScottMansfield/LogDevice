@@ -12,26 +12,29 @@
 #include <pwd.h>
 #include <signal.h>
 #include <unistd.h>
+
+#include <folly/Optional.h>
+#include <folly/Singleton.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 
-#include <folly/Optional.h>
-#include <folly/Singleton.h>
-
 #include "logdevice/common/BuildInfo.h"
-#include "logdevice/common/commandline_util.h"
 #include "logdevice/common/ConstructorFailed.h"
-#include "logdevice/common/debug.h"
-#include "logdevice/common/settings/GossipSettings.h"
 #include "logdevice/common/NoopTraceLogger.h"
-#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/Semaphore.h"
 #include "logdevice/common/StatsCollectionThread.h"
 #include "logdevice/common/ThreadID.h"
 #include "logdevice/common/ZookeeperClient.h"
+#include "logdevice/common/commandline_util.h"
+#include "logdevice/common/debug.h"
+#include "logdevice/common/plugin/PluginRegistry.h"
+#include "logdevice/common/plugin/StaticPluginLoader.h"
+#include "logdevice/common/settings/GossipSettings.h"
+#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/settings/SettingsUpdater.h"
 #include "logdevice/server/Server.h"
+#include "logdevice/server/ServerBuiltinPluginProvider.h"
 #include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/ServerProcessor.h"
 #include "logdevice/server/fatalsignal.h"
@@ -276,9 +279,14 @@ int main(int argc, const char** argv) {
 
   ThreadID::set(ThreadID::Type::UTILITY, "logdeviced-main");
 
-  std::string plugin_debug_str;
+  std::shared_ptr<PluginRegistry> plugin_registry =
+      std::make_shared<PluginRegistry>(
+          createPluginVector<StaticPluginLoader,
+                             ServerBuiltinPluginProvider>());
   std::shared_ptr<ServerPluginPack> plugin =
-      load_server_plugin(&plugin_debug_str);
+      plugin_registry->getSinglePlugin<ServerPluginPack>(
+          PluginType::LEGACY_SERVER_PLUGIN);
+  ld_check(plugin);
 
   plugin->optimizeHotText();
 
@@ -331,7 +339,9 @@ int main(int argc, const char** argv) {
     }
 
     if (parsed.count("version")) {
-      std::unique_ptr<BuildInfo> build_info = plugin->createBuildInfo();
+      auto build_info =
+          plugin_registry->getSinglePlugin<BuildInfo>(PluginType::BUILD_INFO);
+      ld_check(build_info);
       std::cout << "version " << build_info->version() << '\n';
       std::string package = build_info->packageNameWithVersion();
       if (!package.empty()) {
@@ -361,11 +371,14 @@ int main(int argc, const char** argv) {
       std::bind(on_server_settings_changed, server_settings));
 
   // Now that the logging framework is initialised, log plugin info
-  ld_info("%s", plugin_debug_str.c_str());
+  ld_info(
+      "Plugins loaded: %s", plugin_registry->getStateDescriptionStr().c_str());
 
   ld_info("server starting");
   {
-    std::unique_ptr<BuildInfo> build_info = plugin->createBuildInfo();
+    auto build_info =
+        plugin_registry->getSinglePlugin<BuildInfo>(PluginType::BUILD_INFO);
+    ld_check(build_info);
     ld_info("version %s", build_info->version().c_str());
     std::string str = build_info_string(*build_info);
     if (!str.empty()) {
@@ -388,7 +401,7 @@ int main(int argc, const char** argv) {
                                                 gossip_settings,
                                                 settings,
                                                 rocksdb_settings,
-                                                plugin);
+                                                plugin_registry);
   } catch (const ConstructorFailed&) {
     return 1;
   }
@@ -398,25 +411,14 @@ int main(int argc, const char** argv) {
   drop_root(server_settings);
 
   // Run the StatsCollectionThread
-  // This is a singleton thread even if multiple server are running, the Stats
-  // are shared across all instances.
-  std::unique_ptr<StatsCollectionThread> stats_thread;
-
-  auto stats_collection_interval = settings->stats_collection_interval;
-
-  if (stats_collection_interval.count() > 0) {
-    auto cfg = params.get()->getUpdateableConfig()->get();
-    auto stats_publisher = plugin->createStatsPublisher(
-        StatsPublisherScope::SERVER, settings, params->getNumDBShards());
-    if (stats_publisher) {
-      auto rollup_entity = cfg->serverConfig()->getClusterName();
-      stats_publisher->addRollupEntity(rollup_entity);
-      stats_thread =
-          std::make_unique<StatsCollectionThread>(params.get()->getStats(),
-                                                  stats_collection_interval,
-                                                  std::move(stats_publisher));
-    }
-  }
+  std::unique_ptr<StatsCollectionThread> stats_thread =
+      StatsCollectionThread::maybeCreate(
+          settings,
+          params.get()->getUpdateableConfig()->get()->serverConfig(),
+          plugin_registry,
+          StatsPublisherScope::SERVER,
+          params->getNumDBShards(),
+          params.get()->getStats());
 
   Server server(params.get(), signal_shutdown);
 

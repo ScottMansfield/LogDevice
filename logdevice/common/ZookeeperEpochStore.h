@@ -8,13 +8,11 @@
 #pragma once
 
 #include <chrono>
-#include <string>
 #include <memory>
+#include <string>
 
 #include <boost/noncopyable.hpp>
-
 #include <folly/Optional.h>
-
 #include <zookeeper/zookeeper.h>
 
 #include "logdevice/common/EpochStore.h"
@@ -22,9 +20,9 @@
 #include "logdevice/common/MetaDataTracer.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/Processor.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/UpdateableSharedPtr.h"
 #include "logdevice/common/ZookeeperClientBase.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/include/ConfigSubscriptionHandle.h"
@@ -48,17 +46,19 @@ class ZookeeperEpochStore : public EpochStore, boost::noncopyable {
    * @param   cluster_name  name of LD cluster this epoch store services
    * @param   processor     parent processor for current ZookeeperEpochStore
    * @param   zkclient      Zookeeper client
-   * @param   config        cluster config, we only use this to get the id
+   * @param   config        Zookeeper config, we only use this to get the id
    *                        of the node we are running on
    * @param   settings      settings, used to get zk-create-root-znodes
    * @param   zkFactory     factory used to create ZookeeperClient
    *
    */
-  ZookeeperEpochStore(std::string cluster_name,
-                      Processor* processor,
-                      const std::shared_ptr<UpdateableServerConfig>& config,
-                      UpdateableSettings<Settings> settings,
-                      ZKFactory zkFactory);
+  ZookeeperEpochStore(
+      std::string cluster_name,
+      Processor* processor,
+      const std::shared_ptr<UpdateableZookeeperConfig>& zk_config,
+      const std::shared_ptr<UpdateableServerConfig>& server_config,
+      UpdateableSettings<Settings> settings,
+      ZKFactory zkFactory);
 
   ~ZookeeperEpochStore() override;
 
@@ -76,12 +76,6 @@ class ZookeeperEpochStore : public EpochStore, boost::noncopyable {
       WriteNodeID write_node_id = WriteNodeID::NO) override;
 
   std::string identify() const override;
-
-  /**
-   * @return  id of this node in config_, or an invalid NodeID if this node
-   *          does not appear in config.
-   */
-  NodeID getMyNodeID() const;
 
   /**
    * Attempts to post an completion requests containing the result of
@@ -147,8 +141,10 @@ class ZookeeperEpochStore : public EpochStore, boost::noncopyable {
   // component of the path to epoch znodes
   std::string cluster_name_;
 
-  // Cluster config.
-  std::shared_ptr<UpdateableServerConfig> config_;
+  std::shared_ptr<UpdateableZookeeperConfig> zk_config_;
+
+  // Cluster config, used to figure out NodeID
+  std::shared_ptr<UpdateableServerConfig> server_config_;
 
   // Settings
   UpdateableSettings<Settings> settings_;

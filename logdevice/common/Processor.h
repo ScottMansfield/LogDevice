@@ -20,10 +20,10 @@
 
 #include "logdevice/common/ResourceBudget.h"
 #include "logdevice/common/Semaphore.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/WorkerType.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/types.h"
 // Think twice before adding new includes here!  This file is included in many
 // translation units and increasing its transitive dependency footprint will
@@ -39,23 +39,25 @@ namespace facebook { namespace logdevice {
 
 class AllSequencers;
 class AppendProbeController;
+class ClientAPIHitsTracer;
 class ClientIdxAllocator;
 class ClusterState;
 class EventLogRebuildingSet;
 class EventLoopHandle;
+class LegacyPluginPack;
 class PermissionChecker;
-class PluginPack;
+class PluginRegistry;
 class PrincipalParser;
 class ProcessorImpl;
 class RebuildingSupervisor;
 class Request;
-class UpdateableSecurityInfo;
 class SequencerBatching;
 class SequencerLocator;
 class StatsHolder;
 class TraceLogger;
 class TrafficShaper;
 class UpdateableConfig;
+class UpdateableSecurityInfo;
 class WatchDogThread;
 class Worker;
 class ZeroCopiedRecordDisposal;
@@ -96,7 +98,8 @@ class Processor : public folly::enable_shared_from_this<Processor> {
             UpdateableSettings<Settings> settings,
             StatsHolder* stats,
             std::unique_ptr<SequencerLocator> sequencer_locator,
-            std::shared_ptr<PluginPack> plugin,
+            std::shared_ptr<LegacyPluginPack> plugin,
+            std::shared_ptr<PluginRegistry> plugin_registry,
             std::string credentials = "",
             std::string csid = "",
             std::string name = "logdevice");
@@ -407,8 +410,10 @@ class Processor : public folly::enable_shared_from_this<Processor> {
   // all objects running on those EventLoops
   UpdateableSettings<Settings> settings_;
 
+  std::shared_ptr<LegacyPluginPack> plugin_;
+  std::shared_ptr<PluginRegistry> plugin_registry_;
+
  public:
-  std::shared_ptr<PluginPack> plugin_;
   StatsHolder* stats_;
 
   friend class ProcessorImpl;
@@ -467,6 +472,11 @@ class Processor : public folly::enable_shared_from_this<Processor> {
   // If it's non-nullptr we don't have any guarantees about how up-to-date it
   // is either, but it's not likely to be far behind.
   UpdateableSharedPtr<EventLogRebuildingSet> rebuilding_set_;
+
+  /**
+   * Tracer for API calls.
+   */
+  std::unique_ptr<ClientAPIHitsTracer> api_hits_tracer_;
 
   // The credentials used in HELLO message if the authentication_type specified
   // in the configuration file is set to "self_identification"
@@ -542,8 +552,11 @@ class Processor : public folly::enable_shared_from_this<Processor> {
 
   ClientIdxAllocator& clientIdxAllocator() const;
 
-  std::shared_ptr<PluginPack> getPlugin() {
+  std::shared_ptr<LegacyPluginPack> getPlugin() {
     return plugin_;
+  }
+  std::shared_ptr<PluginRegistry> getPluginRegistry() {
+    return plugin_registry_;
   }
 
   // Run the given function on whichever background thread gets to it first.

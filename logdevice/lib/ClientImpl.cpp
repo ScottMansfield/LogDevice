@@ -11,7 +11,6 @@
 #include <unordered_map>
 
 #include <boost/algorithm/string.hpp>
-
 #include <folly/Memory.h>
 #include <folly/Random.h>
 
@@ -20,8 +19,8 @@
 #include "logdevice/common/ClientBridge.h"
 #include "logdevice/common/ClientEventTracer.h"
 #include "logdevice/common/ConfigInit.h"
-#include "logdevice/common/DataSizeRequest.h"
 #include "logdevice/common/DataRecordFromTailRecord.h"
+#include "logdevice/common/DataSizeRequest.h"
 #include "logdevice/common/E2ETracer.h"
 #include "logdevice/common/EpochMetaDataCache.h"
 #include "logdevice/common/EpochMetaDataMap.h"
@@ -50,9 +49,11 @@
 #include "logdevice/common/configuration/logs/LogsConfigStateMachine.h"
 #include "logdevice/common/configuration/logs/LogsConfigTree.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/plugin/LocationProvider.h"
+#include "logdevice/common/plugin/TraceLoggerFactory.h"
 #include "logdevice/common/protocol/HELLO_Message.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/SSLSettingValidation.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/util.h"
@@ -60,6 +61,7 @@
 #include "logdevice/include/Err.h"
 #include "logdevice/include/Record.h"
 #include "logdevice/lib/AsyncReaderImpl.h"
+#include "logdevice/lib/ClientBuiltinPluginProvider.h"
 #include "logdevice/lib/ClientPluginPack.h"
 #include "logdevice/lib/ClientProcessor.h"
 #include "logdevice/lib/ClientSettingsImpl.h"
@@ -134,7 +136,10 @@ std::shared_ptr<Client> Client::create(std::string cluster_name,
           cluster_name.c_str(),
           config_url.c_str());
 
-  std::shared_ptr<ClientPluginPack> plugin = load_client_plugin();
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
+  ld_info(
+      "Plugins loaded: %s", plugin_registry->getStateDescriptionStr().c_str());
 
   // If caller provided a ClientSettings instance, use that, otherwise create
   // one with default settings
@@ -143,15 +148,17 @@ std::shared_ptr<Client> Client::create(std::string cluster_name,
   std::unique_ptr<ClientSettingsImpl> impl_settings(
       static_cast<ClientSettingsImpl*>(raw_settings));
 
-  if (plugin) {
-    std::string plugin_location = plugin->getMyLocation();
-    auto location = raw_settings->get("my-location");
-    std::string location_str = location.hasValue() ? location.value() : "";
-    if (location_str.empty() && !plugin_location.empty()) {
-      // if my-location was not specified, set the value to what the plugin
-      // provides.
-      raw_settings->set("my-location", plugin_location.c_str());
-    }
+  std::shared_ptr<LocationProvider> location_plugin =
+      plugin_registry->getSinglePlugin<LocationProvider>(
+          PluginType::LOCATION_PROVIDER);
+  std::string plugin_location =
+      location_plugin ? location_plugin->getMyLocation() : "";
+  auto location = raw_settings->get("my-location");
+  std::string location_str = location.hasValue() ? location.value() : "";
+  if (location_str.empty() && !plugin_location.empty()) {
+    // if my-location was not specified, set the value to what the plugin
+    // provides.
+    raw_settings->set("my-location", plugin_location.c_str());
   }
 
   auto settings_updater = impl_settings->getSettingsUpdater();
@@ -197,10 +204,14 @@ std::shared_ptr<Client> Client::create(std::string cluster_name,
   config_init.setZookeeperPollingInterval(
       impl_settings->getSettings()->zk_config_polling_interval);
 
+  std::shared_ptr<ClientPluginPack> plugin =
+      plugin_registry->getSinglePlugin<ClientPluginPack>(
+          PluginType::LEGACY_CLIENT_PLUGIN);
+  ld_check(plugin);
   int rv = config_init.attach(config_url,
                               plugin,
-                              config->updateableServerConfig(),
-                              config->updateableLogsConfig(),
+                              plugin_registry,
+                              config,
                               std::move(logs_cfg),
                               impl_settings->getSettings(),
                               options);
@@ -239,7 +250,7 @@ std::shared_ptr<Client> Client::create(std::string cluster_name,
                                         csid,
                                         timeout,
                                         std::move(impl_settings),
-                                        plugin);
+                                        plugin_registry);
   } catch (const ConstructorFailed&) {
     // err set by the constructor
     ld_error("Constructing ClientImpl failed with %s.", error_description(err));
@@ -274,15 +285,18 @@ ClientImpl::ClientImpl(std::string cluster_name,
                        std::string csid,
                        std::chrono::milliseconds timeout,
                        std::unique_ptr<ClientSettings>&& settings,
-                       std::shared_ptr<ClientPluginPack> plugin)
+                       std::shared_ptr<PluginRegistry> plugin_registry)
     : ClientImpl(std::move(cluster_name),
                  config,
                  std::move(credentials),
                  std::move(csid),
                  std::move(timeout),
                  std::move(settings),
-                 plugin->createSequencerLocator(config),
-                 plugin) {}
+                 plugin_registry
+                     ->getSinglePlugin<ClientPluginPack>(
+                         PluginType::LEGACY_CLIENT_PLUGIN)
+                     ->createSequencerLocator(config),
+                 plugin_registry) {}
 
 bool ClientImpl::validateServerConfig(ServerConfig& cfg) const {
   ld_check(config_);
@@ -306,8 +320,8 @@ ClientImpl::ClientImpl(std::string cluster_name,
                        std::chrono::milliseconds timeout,
                        std::unique_ptr<ClientSettings>&& client_settings,
                        std::unique_ptr<SequencerLocator> sequencer_locator,
-                       std::shared_ptr<ClientPluginPack> plugin)
-    : plugin_(std::move(plugin)),
+                       std::shared_ptr<PluginRegistry> plugin_registry)
+    : plugin_registry_(std::move(plugin_registry)),
       cluster_name_(cluster_name),
       credentials_(std::move(credentials)),
       csid_(std::move(csid)),
@@ -350,22 +364,30 @@ ClientImpl::ClientImpl(std::string cluster_name,
 
   std::shared_ptr<ServerConfig> server_cfg = config_->get()->serverConfig();
 
-  if (settings->trace_logger_disabled) {
+  std::shared_ptr<TraceLoggerFactory> trace_logger_factory =
+      plugin_registry_->getSinglePlugin<TraceLoggerFactory>(
+          PluginType::TRACE_LOGGER_FACTORY);
+  if (!trace_logger_factory || settings->trace_logger_disabled) {
     trace_logger_ = std::make_shared<NoopTraceLogger>(config_);
   } else {
-    trace_logger_ = plugin_->createTraceLogger(config_);
+    trace_logger_ = (*trace_logger_factory)(config_);
   }
 
-  api_hits_tracer_ = std::make_unique<ClientAPIHitsTracer>(trace_logger_);
   event_tracer_ =
       std::make_unique<ClientEventTracer>(trace_logger_, stats_.get());
+
+  std::shared_ptr<ClientPluginPack> plugin =
+      plugin_registry_->getSinglePlugin<ClientPluginPack>(
+          PluginType::LEGACY_CLIENT_PLUGIN);
+  ld_check(plugin);
 
   processor_ = ClientProcessor::create(config_,
                                        trace_logger_,
                                        settings,
                                        stats_.get(),
                                        std::move(sequencer_locator),
-                                       plugin_,
+                                       plugin,
+                                       plugin_registry_,
                                        credentials_,
                                        csid_);
 
@@ -377,22 +399,13 @@ ClientImpl::ClientImpl(std::string cluster_name,
     throw ConstructorFailed();
   }
 
-  if (settings->stats_collection_interval.count() > 0) {
-    auto stats_publisher =
-        plugin_->createStatsPublisher(StatsPublisherScope::CLIENT, settings, 0);
-    if (stats_publisher) {
-      auto rollup_entity = config_->get()->serverConfig()->getClusterName();
-      stats_publisher->addRollupEntity(rollup_entity);
-      // This is here for backward compatibility with our tooling. The
-      // <tier>.client entity space is deprecated and all new tooling should
-      // be using the tier name without suffix
-      stats_publisher->addRollupEntity(rollup_entity + ".client");
-      stats_thread_ = std::make_unique<StatsCollectionThread>(
-          stats_.get(),
-          settings->stats_collection_interval,
-          std::move(stats_publisher));
-    }
-  }
+  stats_thread_ =
+      StatsCollectionThread::maybeCreate(settings_->getSettings(),
+                                         config_->get()->serverConfig(),
+                                         plugin_registry_,
+                                         StatsPublisherScope::CLIENT,
+                                         /* num_shards */ 0,
+                                         stats_.get());
 
   if (!config_->getLogsConfig() || !config_->getLogsConfig()->isFullyLoaded()) {
     Semaphore sem;
@@ -1527,18 +1540,15 @@ int ClientImpl::trim(logid_t logid,
                      lsn_t lsn,
                      std::unique_ptr<std::string> per_request_token,
                      trim_callback_t cb) noexcept {
-  auto cb_wrapper =
-      [logid,
-       lsn,
-       cb,
-       start = SteadyClock::now(),
-       weak_ref = std::weak_ptr<ClientImpl>(shared_from_this())](Status st) {
-        // log response
-        if (auto self = weak_ref.lock()) {
-          self->api_hits_tracer_->traceTrim(msec_since(start), logid, lsn, st);
-        }
-        cb(st);
-      };
+  auto cb_wrapper = [logid, lsn, cb, start = SteadyClock::now()](Status st) {
+    // log response
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceTrim(
+          msec_since(start), logid, lsn, st);
+    }
+    cb(st);
+  };
   auto reqImpl = std::make_unique<TrimRequest>(
       bridge_.get(),
       logid,
@@ -1620,18 +1630,16 @@ int ClientImpl::findTime(logid_t logid,
                          std::chrono::milliseconds timestamp,
                          find_time_callback_t cb,
                          FindKeyAccuracy accuracy) noexcept {
-  auto cb_wrapper = [cb,
-                     logid,
-                     timestamp,
-                     accuracy,
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this()),
-                     start = SteadyClock::now()](Status st, lsn_t result) {
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceFindTime(
-          msec_since(start), logid, timestamp, accuracy, st, result);
-    }
-    cb(st, result);
-  };
+  auto cb_wrapper =
+      [cb, logid, timestamp, accuracy, start = SteadyClock::now()](
+          Status st, lsn_t result) {
+        Worker* w = Worker::onThisThread();
+        if (w) {
+          w->processor_->api_hits_tracer_->traceFindTime(
+              msec_since(start), logid, timestamp, accuracy, st, result);
+        }
+        cb(st, result);
+      };
 
   std::unique_ptr<Request> req = std::make_unique<FindKeyRequest>(
       logid,
@@ -1664,21 +1672,18 @@ int ClientImpl::findKey(logid_t logid,
                         std::string key,
                         find_key_callback_t cb,
                         FindKeyAccuracy accuracy) noexcept {
-  auto cb_wrapper = [cb,
-                     logid,
-                     key,
-                     accuracy,
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this()),
-                     start = SteadyClock::now()](FindKeyResult result) {
+  auto cb_wrapper = [cb, logid, key, accuracy, start = SteadyClock::now()](
+                        FindKeyResult result) {
     // log response
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceFindKey(msec_since(start),
-                                           logid,
-                                           key,
-                                           accuracy,
-                                           result.status,
-                                           result.lo,
-                                           result.hi);
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceFindKey(msec_since(start),
+                                                    logid,
+                                                    key,
+                                                    accuracy,
+                                                    result.status,
+                                                    result.lo,
+                                                    result.hi);
     }
     cb(result);
   };
@@ -1734,13 +1739,12 @@ int ClientImpl::isLogEmptySync(logid_t logid, bool* empty) noexcept {
 }
 
 int ClientImpl::isLogEmpty(logid_t logid, is_empty_callback_t cb) noexcept {
-  auto cb_wrapper = [cb,
-                     logid,
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this()),
-                     start = SteadyClock::now()](Status st, bool empty) {
+  auto cb_wrapper = [cb, logid, start = SteadyClock::now()](
+                        Status st, bool empty) {
     // log response
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceIsLogEmpty(
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceIsLogEmpty(
           msec_since(start), logid, st, empty);
     }
     cb(st, empty);
@@ -1800,13 +1804,13 @@ int ClientImpl::dataSize(logid_t logid,
                          std::chrono::milliseconds end,
                          DataSizeAccuracy accuracy,
                          data_size_callback_t cb) noexcept {
-  auto cb_wrapper = [cb,
-                     logid,
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this()),
-                     start = SteadyClock::now()](Status st, size_t size) {
+  auto cb_wrapper = [cb, logid, start = SteadyClock::now()](
+                        Status st, size_t size) {
     // log response
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceDataSize(msec_since(start), logid, st, size);
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceDataSize(
+          msec_since(start), logid, st, size);
     }
     cb(st, size);
   };
@@ -1847,10 +1851,7 @@ lsn_t ClientImpl::getTailLSNSync(logid_t logid) noexcept {
 
 int ClientImpl::getTailLSN(logid_t logid, get_tail_lsn_callback_t cb) noexcept {
   auto cb_wrapper =
-      [logid,
-       cb,
-       weak_ref = std::weak_ptr<ClientImpl>(shared_from_this()),
-       start = SteadyClock::now()](
+      [logid, cb, start = SteadyClock::now()](
           Status st,
           NodeID /*seq*/,
           lsn_t next_lsn,
@@ -1859,8 +1860,9 @@ int ClientImpl::getTailLSN(logid_t logid, get_tail_lsn_callback_t cb) noexcept {
           std::shared_ptr<TailRecord> /*tail_record*/) {
         auto resp = next_lsn <= LSN_OLDEST ? next_lsn : next_lsn - 1;
         // log response
-        if (auto self = weak_ref.lock()) {
-          self->api_hits_tracer_->traceGetTailLSN(
+        Worker* w = Worker::onThisThread();
+        if (w) {
+          w->processor_->api_hits_tracer_->traceGetTailLSN(
               msec_since(start), logid, st, resp);
         }
         cb(st, resp);
@@ -1902,10 +1904,7 @@ ClientImpl::getTailAttributesSync(logid_t logid) noexcept {
 
 int ClientImpl::getTailAttributes(logid_t logid,
                                   get_tail_attributes_callback_t cb) noexcept {
-  auto cb_wrapper = [logid,
-                     cb,
-                     start = SteadyClock::now(),
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this())](
+  auto cb_wrapper = [logid, cb, start = SteadyClock::now()](
                         Status st,
                         NodeID /*seq*/,
                         lsn_t /*next_lsn*/,
@@ -1913,8 +1912,9 @@ int ClientImpl::getTailAttributes(logid_t logid,
                         std::shared_ptr<const EpochMetaDataMap> /*unused*/,
                         std::shared_ptr<TailRecord> /*unused*/) {
     // log response
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceGetTailAttributes(
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceGetTailAttributes(
           msec_since(start), logid, st, tail_attributes.get());
     }
     // Check if recovery is running and sequencer can not provide log tail
@@ -2113,15 +2113,13 @@ ClientImpl::getHeadAttributesSync(logid_t logid) noexcept {
 
 int ClientImpl::getHeadAttributes(logid_t logid,
                                   get_head_attributes_callback_t cb) noexcept {
-  auto cb_wrapper = [logid,
-                     cb,
-                     start = SteadyClock::now(),
-                     weak_ref = std::weak_ptr<ClientImpl>(shared_from_this())](
+  auto cb_wrapper = [logid, cb, start = SteadyClock::now()](
                         Status st,
                         std::unique_ptr<LogHeadAttributes> head_attributes) {
     // log response
-    if (auto self = weak_ref.lock()) {
-      self->api_hits_tracer_->traceGetHeadAttributes(
+    Worker* w = Worker::onThisThread();
+    if (w) {
+      w->processor_->api_hits_tracer_->traceGetHeadAttributes(
           msec_since(start), logid, st, head_attributes.get());
     }
     cb(st, std::move(head_attributes));

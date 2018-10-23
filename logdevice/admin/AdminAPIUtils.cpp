@@ -7,19 +7,42 @@
  */
 
 #include "logdevice/admin/AdminAPIUtils.h"
+
+#include "logdevice/admin/Conv.h"
+#include "logdevice/common/AuthoritativeStatus.h"
+#include "logdevice/common/ClusterState.h"
 #include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/Node.h"
 #include "logdevice/common/event_log/EventLogRebuildingSet.h"
-#include "logdevice/common/ClusterState.h"
 #include "logdevice/server/FailureDetector.h"
-#include "logdevice/common/AuthoritativeStatus.h"
 
 using namespace facebook::logdevice::configuration;
 
 namespace facebook { namespace logdevice {
 
+std::string toString(const thrift::SocketAddressFamily& family) {
+  switch (family) {
+    case thrift::SocketAddressFamily::INET:
+      return "INET";
+    case thrift::SocketAddressFamily::UNIX:
+      return "UNIX";
+  }
+  ld_check(false);
+  return "";
+}
+
+std::string toString(const thrift::SocketAddress& address) {
+  return folly::format("{}-[{}{}]",
+                       toString(address.get_address_family()),
+                       address.get_address() ? *address.get_address() : "",
+                       address.get_port()
+                           ? ":" + std::to_string(*address.get_port())
+                           : "")
+      .str();
+}
+
 bool match_by_address(const configuration::Node& node,
-                      thrift::SocketAddress* address) {
+                      const thrift::SocketAddress* address) {
   ld_check(address);
   if (node.address.isUnixAddress() &&
       address->address_family == thrift::SocketAddressFamily::UNIX &&
@@ -41,13 +64,7 @@ void forFilteredNodes(const configuration::Nodes& nodes,
   folly::Optional<NodeRole> role_filter;
 
   if (filter && filter->get_role()) {
-    auto ld_role = toLDRole(*filter->get_role());
-    if (!ld_role) {
-      // If this is an invalid role, we bail.
-      thrift::InvalidRequest err;
-      err.set_message("Invalid role supplied!");
-      throw err;
-    }
+    NodeRole ld_role = toLogDevice<NodeRole>(*filter->get_role());
     role_filter.assign(ld_role);
   }
 
@@ -61,13 +78,16 @@ void forFilteredNodes(const configuration::Nodes& nodes,
     if (role_filter) {
       res &= node.hasRole(*role_filter);
     }
-    // filter by address
-    if (filter->get_address()) {
-      res &= match_by_address(node, filter->get_address());
-    }
-    // filter by index
-    if (filter->get_node_index()) {
-      res &= (index == *filter->get_node_index());
+    // filter by node
+    if (filter->get_node()) {
+      auto* node_identifier = filter->get_node();
+      if (node_identifier->get_address()) {
+        res &= match_by_address(node, node_identifier->get_address());
+      }
+      // filter by index
+      if (node_identifier->get_node_index()) {
+        res &= (index == *node_identifier->get_node_index());
+      }
     }
     // filter by location
     if (filter->get_location()) {
@@ -82,28 +102,6 @@ void forFilteredNodes(const configuration::Nodes& nodes,
     if (matches(it.first, it.second)) {
       fn(it);
     }
-  }
-}
-
-thrift::Role toThriftRole(NodeRole role) {
-  switch (role) {
-    case NodeRole::SEQUENCER:
-      return thrift::Role::SEQUENCER;
-    case NodeRole::STORAGE:
-      return thrift::Role::STORAGE;
-  }
-  ld_check(false);
-  return thrift::Role::STORAGE;
-}
-
-folly::Optional<NodeRole> toLDRole(thrift::Role role) {
-  switch (role) {
-    case thrift::Role::SEQUENCER:
-      return NodeRole::SEQUENCER;
-    case thrift::Role::STORAGE:
-      return NodeRole::STORAGE;
-    default:
-      return folly::none;
   }
 }
 
@@ -149,19 +147,6 @@ toShardOperationalState(StorageState storage_state,
   return thrift::ShardOperationalState::INVALID;
 }
 
-thrift::ShardStorageState toShardStorageState(StorageState storage_state) {
-  switch (storage_state) {
-    case StorageState::DISABLED:
-      return thrift::ShardStorageState::DISABLED;
-    case StorageState::READ_ONLY:
-      return thrift::ShardStorageState::READ_ONLY;
-    case StorageState::READ_WRITE:
-      return thrift::ShardStorageState::READ_WRITE;
-  }
-  ld_check(false);
-  return thrift::ShardStorageState::DISABLED;
-}
-
 void fillNodeConfig(thrift::NodeConfig& out,
                     node_index_t node_index,
                     const Node& node) {
@@ -180,7 +165,7 @@ void fillNodeConfig(thrift::NodeConfig& out,
     roles.insert(thrift::Role::STORAGE);
     // Storage Node Config
     thrift::StorageConfig storage_config;
-    storage_config.set_capacity(node.storage_attributes->capacity);
+    storage_config.set_weight(node.storage_attributes->capacity);
     storage_config.set_num_shards(node.getNumShards());
     out.set_storage(std::move(storage_config));
   }
@@ -278,7 +263,7 @@ void fillNodeState(thrift::NodeState& out,
           ? rebuilding_set->getNodeInfo(node_index, shard_index)
           : nullptr;
       state.set_current_storage_state(
-          toShardStorageState(node.getStorageState()));
+          toThrift<thrift::ShardStorageState>(node.getStorageState()));
       state.set_current_operational_state(
           toShardOperationalState(node.getStorageState(), node_info));
       AuthoritativeStatus auth_status =
@@ -294,4 +279,46 @@ void fillNodeState(thrift::NodeState& out,
     out.set_shard_states(std::move(shard_states));
   }
 }
+
+ShardID resolveShardOrNode(const thrift::ShardID& shard,
+                           const configuration::Nodes& nodes) {
+  shard_index_t shard_index = (shard.shard_index < 0) ? -1 : shard.shard_index;
+  node_index_t node_index = -1;
+  if (shard.get_node().get_node_index()) {
+    node_index = *shard.get_node().get_node_index();
+  } else if (shard.get_node().get_address()) {
+    // resolve the node index from the nodes configuration.
+    for (const auto& it : nodes) {
+      if (match_by_address(it.second, shard.get_node().get_address())) {
+        node_index = it.first;
+        break;
+      }
+    }
+    // We didn't find the node.
+    thrift::InvalidRequest err;
+    err.set_message(
+        folly::format(
+            "Node with address '{}' was not found in the nodes config.",
+            toString(*shard.get_node().get_address()))
+            .str());
+    throw err;
+  } else {
+    thrift::InvalidRequest err;
+    err.set_message("Cannot accept nodes or shards without specifying an "
+                    "address or node index");
+    throw err;
+  }
+
+  return ShardID(node_index, shard_index);
+}
+
+ShardSet expandShardSet(const thrift::ShardSet& thrift_shards,
+                        const configuration::Nodes& nodes) {
+  ShardSet output;
+  for (const auto& it : thrift_shards) {
+    output.insert(resolveShardOrNode(it, nodes));
+  }
+  return output;
+}
+
 }} // namespace facebook::logdevice

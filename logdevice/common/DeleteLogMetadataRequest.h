@@ -8,17 +8,18 @@
 #pragma once
 
 #include <set>
-#include <folly/SharedMutex.h>
-#include <folly/Conv.h>
 
-#include "logdevice/include/types.h"
+#include <folly/Conv.h>
+#include <folly/SharedMutex.h>
+
+#include "logdevice/common/FireAndForgetRequest.h"
 #include "logdevice/common/Metadata.h"
 #include "logdevice/common/Request.h"
-#include "logdevice/common/ShardID.h"
-#include "logdevice/common/FireAndForgetRequest.h"
 #include "logdevice/common/RequestType.h"
-#include "logdevice/common/LibeventTimer.h"
+#include "logdevice/common/ShardID.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/protocol/DELETE_LOG_METADATA_Message.h"
+#include "logdevice/include/types.h"
 
 namespace facebook { namespace logdevice {
 
@@ -88,7 +89,7 @@ class DeleteLogMetadataRequest : public FireAndForgetRequest {
 
   std::atomic<int> numPendingReplies_;
 
-  std::unique_ptr<LibeventTimer> request_timer_;
+  std::unique_ptr<Timer> request_timer_;
 };
 
 }} // namespace facebook::logdevice

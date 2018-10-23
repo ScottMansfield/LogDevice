@@ -11,17 +11,14 @@
 #include <chrono>
 #include <string>
 
-#include "logdevice/common/debug.h"
 #include "logdevice/common/SequencerLocator.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/StorageTask-enums.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/configuration/ZookeeperConfigSource.h"
-
+#include "logdevice/common/debug.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
-
+#include "logdevice/common/util.h"
 #include "logdevice/server/locallogstore/LocalLogStoreSettings.h"
-
 #include "logdevice/server/storage_tasks/StorageThreadPool.h"
 
 /**
@@ -45,6 +42,8 @@ struct ServerSettings : public SettingsBundle {
   int ssl_command_port;
   std::string ssl_command_unix_socket;
   bool admin_enabled;
+  int safety_max_logs_in_flight;
+  std::chrono::milliseconds safety_check_timeout;
   int command_conn_limit;
   dbg::Level loglevel;
   dbg::LogLevelMap loglevel_overrides;

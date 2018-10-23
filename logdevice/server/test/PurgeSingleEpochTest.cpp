@@ -5,22 +5,24 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/server/storage/PurgeSingleEpoch.h"
+
 #include <chrono>
-#include <folly/Memory.h>
-#include <gtest/gtest.h>
 #include <memory>
 #include <vector>
 
-#include "logdevice/common/LibeventTimer.h"
+#include <folly/Memory.h>
+#include <gtest/gtest.h>
+
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/stats/Stats.h"
+#include "logdevice/common/test/MockBackoffTimer.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
 #include "logdevice/common/util.h"
 #include "logdevice/server/locallogstore/test/StoreUtil.h"
 #include "logdevice/server/locallogstore/test/TemporaryLogStore.h"
-#include "logdevice/server/storage/PurgeSingleEpoch.h"
 #include "logdevice/server/storage/PurgeUncleanEpochs.h"
-#include "logdevice/common/test/MockBackoffTimer.h"
 
 using namespace facebook::logdevice;
 using namespace facebook::logdevice::NodeSetTestUtil;
@@ -132,7 +134,7 @@ void PurgeSingleEpochTest::setUp() {
   auto logs_config = std::make_shared<configuration::LocalLogsConfig>();
   addLog(logs_config.get(), log_id_, 1, 0, 1, {});
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData(
+      ServerConfig::fromDataTest(
           "purge_single_epoch_test", std::move(nodes_config)),
       std::move(logs_config));
 

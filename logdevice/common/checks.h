@@ -8,7 +8,9 @@
 #pragma once
 
 #include <initializer_list>
+
 #include <folly/Likely.h>
+#include <folly/Portability.h>
 
 namespace facebook { namespace logdevice { namespace dbg {
 
@@ -70,7 +72,7 @@ void ld_check_fail_impl(CheckType type,
   do {                                                                     \
     auto val1{x};                                                          \
     auto val2{y};                                                          \
-    if (UNLIKELY(!(val1 op val2))) {                                       \
+    if ((precheck) && UNLIKELY(!(val1 op val2))) {                         \
       ld_check_fail_impl(::facebook::logdevice::dbg::CheckType::type,      \
                          (std::string(#x) + " " #op " " #y " (" +          \
                           ::facebook::logdevice::toString(val1) + " vs " + \
@@ -80,6 +82,24 @@ void ld_check_fail_impl(CheckType type,
                          __FUNCTION__,                                     \
                          __LINE__);                                        \
     }                                                                      \
+  } while (false)
+
+#define ld_check_base_between(x, min, max, precheck, type)                  \
+  do {                                                                      \
+    auto val{x};                                                            \
+    auto min_val{min};                                                      \
+    auto max_val{max};                                                      \
+    if ((precheck) && UNLIKELY((val) < (min_val) || (val) > (max_val))) {   \
+      ld_check_fail_impl(::facebook::logdevice::dbg::CheckType::type,       \
+                         (std::string(#min " <= " #x " <= " #max " (") +    \
+                          ::facebook::logdevice::toString(val) + " vs [" +  \
+                          ::facebook::logdevice::toString(min_val) + ", " + \
+                          ::facebook::logdevice::toString(max_val) + "])")  \
+                             .c_str(),                                      \
+                         __FILE__,                                          \
+                         __FUNCTION__,                                      \
+                         __LINE__);                                         \
+    }                                                                       \
   } while (false)
 
 //////////  Check: Conditions that are evaulated in non-debug, as well as debug
@@ -99,6 +119,8 @@ void ld_check_fail_impl(CheckType type,
 #define ld_check_lt(x, y) ld_check_op(<, x, y)
 #define ld_check_ge(x, y) ld_check_op(>=, x, y)
 #define ld_check_gt(x, y) ld_check_op(>, x, y)
+#define ld_check_between(x, min, max) \
+  ld_check_base_between(x, min, max, true, CHECK)
 
 //////////  Assert: Conditions that are only evaulated in debug builds.
 
@@ -116,30 +138,40 @@ void ld_check_fail_impl(CheckType type,
 #define ld_assert_lt(x, y) ld_assert_op(<, x, y)
 #define ld_assert_ge(x, y) ld_assert_op(>=, x, y)
 #define ld_assert_gt(x, y) ld_assert_op(>, x, y)
+#define ld_assert_between(x, min, max) \
+  ld_check_base_between(x, min, max, ::folly::kIsDebug, ASSERT)
 
 template <typename T>
-inline std::initializer_list<T> ListHelper(std::initializer_list<T> mylist) {
-  return mylist;
-}
+struct CheckInHelper {
+  T& target;
+  CheckInHelper(T& t) : target(t) {}
+  bool isIn(std::initializer_list<T> mylist) {
+    for (auto it = mylist.begin(); it != mylist.end(); ++it) {
+      if (*it == target) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
 
 // mylist must be enclosed in parens, like this:
 //   ld_check_in(state_, ({State::MUTATION, State::CLEAN}));
-#define ld_check_in(target, mylist)                                            \
-  do {                                                                         \
-    auto target1{target};                                                      \
-    auto mylist1(facebook::logdevice::dbg::ListHelper mylist);                 \
-    if (UNLIKELY(!std::any_of(mylist1.begin(),                                 \
-                              mylist1.end(),                                   \
-                              [&target1](auto x) { return x == target1; }))) { \
-      ld_check_fail_impl(                                                      \
-          ::facebook::logdevice::dbg::CheckType::CHECK,                        \
-          (std::string(#target) + " (" +                                       \
-           ::facebook::logdevice::toString(target1) + ") in " #mylist)         \
-              .c_str(),                                                        \
-          __FILE__,                                                            \
-          __FUNCTION__,                                                        \
-          __LINE__);                                                           \
-    }                                                                          \
+#define ld_check_in(target, mylist)                                           \
+  do {                                                                        \
+    auto target1{target};                                                     \
+    if (UNLIKELY(!facebook::logdevice::dbg::CheckInHelper<decltype(target1)>( \
+                      target1)                                                \
+                      .isIn mylist)) {                                        \
+      ld_check_fail_impl(                                                     \
+          ::facebook::logdevice::dbg::CheckType::CHECK,                       \
+          (std::string(#target) + " (" +                                      \
+           ::facebook::logdevice::toString(target1) + ") in " #mylist)        \
+              .c_str(),                                                       \
+          __FILE__,                                                           \
+          __FUNCTION__,                                                       \
+          __LINE__);                                                          \
+    }                                                                         \
   } while (false)
 
 }}} // namespace facebook::logdevice::dbg

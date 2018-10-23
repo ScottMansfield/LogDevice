@@ -5,11 +5,10 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include <logdevice/common/configuration/NodeLocation.h>
 
 #include <folly/Memory.h>
-
-#include <logdevice/common/configuration/NodeLocation.h>
+#include <gtest/gtest.h>
 #include <logdevice/common/NodeLocationHierarchy.h>
 
 #include "logdevice/common/test/NodeSetTestUtil.h"
@@ -190,7 +189,7 @@ TEST(NodeLocationTest, BuildHierarchy) {
   Configuration::NodesConfig nodes_config;
   nodes_config.setNodes(std::move(nodes));
   std::shared_ptr<ServerConfig> config =
-      ServerConfig::fromData("node_location_test", std::move(nodes_config));
+      ServerConfig::fromDataTest("node_location_test", std::move(nodes_config));
   StorageSet nodeset = {ShardID(0, 0),
                         ShardID(1, 0),
                         ShardID(2, 0),

@@ -12,14 +12,13 @@
 #include <memory>
 #include <zstd.h>
 
-#include <folly/Memory.h>
-#include <folly/IntrusiveList.h>
-#include <folly/Optional.h>
-
 #include <boost/functional/hash.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <folly/IntrusiveList.h>
+#include <folly/Memory.h>
+#include <folly/Optional.h>
 
 #include "logdevice/common/AdminCommandTable.h"
 #include "logdevice/common/AppendRequest.h"
@@ -587,7 +586,7 @@ class ReplicatedStateMachine {
 
   virtual bool shouldCreateSnapshot() const = 0;
   virtual bool canSnapshot() const = 0;
-  virtual void onSnapshotCreated(Status st) = 0;
+  virtual void onSnapshotCreated(Status st, size_t snapshotSize) = 0;
 
   const RSMType rsm_type_;
   const logid_t delta_log_id_;
@@ -736,7 +735,7 @@ class ReplicatedStateMachine {
     std::function<void(Status, lsn_t, const std::string&)> cb;
     // After the append completes, we activate this timer. If the timer expires
     // before we can confirm the delta, we confirm the delta with E::TIMEDOUT.
-    std::unique_ptr<LibeventTimer> timer;
+    std::unique_ptr<Timer> timer;
   };
 
   // List of delta appends in flight that were written with
@@ -803,11 +802,11 @@ class ReplicatedStateMachine {
   bool delta_read_stream_is_healthy_{true};
 
   // See comment in onSnapshotRecord().
-  LibeventTimer fastForwardGracePeriodTimer_;
+  Timer fastForwardGracePeriodTimer_;
   lsn_t allow_fast_forward_up_to_{LSN_INVALID};
 
   // See commen considerStalledAfterGracePeriod().
-  LibeventTimer stallGracePeriodTimer_;
+  Timer stallGracePeriodTimer_;
 
   // Used by wait() method.
   Semaphore sem_;
@@ -817,7 +816,7 @@ class ReplicatedStateMachine {
   //  - grace period passed after last snapshot
   //  - there are new deltas since last snapshot
   std::chrono::milliseconds snapshot_log_timestamp_{0};
-  LibeventTimer snapshotting_timer_;
+  Timer snapshotting_timer_;
 };
 
 template <typename T>

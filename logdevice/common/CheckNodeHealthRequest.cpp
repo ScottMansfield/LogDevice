@@ -8,6 +8,7 @@
 #include "CheckNodeHealthRequest.h"
 
 #include <folly/hash/Hash.h>
+
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/Worker.h"
@@ -281,8 +282,7 @@ const Settings& CheckNodeHealthRequest::getSettings() {
 }
 
 void CheckNodeHealthRequest::activateRequestTimeoutTimer() {
-  request_timeout_timer_ = std::make_unique<LibeventTimer>(
-      Worker::onThisThread()->getEventBase(), [this] { this->noReply(); });
+  request_timeout_timer_ = std::make_unique<Timer>([this] { this->noReply(); });
   request_timeout_timer_->activate(request_timeout_);
 }
 

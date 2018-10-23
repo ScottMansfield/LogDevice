@@ -12,14 +12,14 @@
 
 #include <folly/Optional.h>
 
+#include "logdevice/common/SCDCopysetReordering.h"
+#include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/client_read_stream/ClientReadStreamFailureDetector.h"
 #include "logdevice/common/configuration/NodeLocation.h"
 #include "logdevice/common/protocol/MessageType.h"
 #include "logdevice/common/settings/Durability.h"
 #include "logdevice/common/settings/SequencerBoycottingSettings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
-#include "logdevice/common/SCDCopysetReordering.h"
-#include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/debug.h"
@@ -446,9 +446,11 @@ struct Settings : public SettingsBundle {
   // under-replicated (i.e. it's known that only at most f, but at least one,
   // nodes may have it)
   // If data_log_gap_grace_period is non-zero, it replaces gap_grace_period for
-  // data logs.
+  // data logs. The same applies for metadata_log_gap_grace_period for metadata
+  // logs.
   std::chrono::milliseconds gap_grace_period;
   std::chrono::milliseconds data_log_gap_grace_period;
+  std::chrono::milliseconds metadata_log_gap_grace_period;
 
   // @see Settings.cpp
   std::chrono::milliseconds reader_stalled_grace_period;
@@ -465,6 +467,10 @@ struct Settings : public SettingsBundle {
 
   // Minium timeout for a CheckSealRequest
   std::chrono::milliseconds check_seal_req_min_timeout;
+
+  // interval for update_medatata_map_timer_; default 1 hr
+  std::chrono::milliseconds update_metadata_map_interval{
+      std::chrono::seconds(3600)};
 
   // (client-only setting) Minium timeout for a DeleteLogMetadataRequest
   std::chrono::milliseconds delete_log_metadata_request_timeout;
@@ -506,6 +512,17 @@ struct Settings : public SettingsBundle {
   // (client-only setting) Period for logging in logdevice_readers_flow scuba
   // table. Set it to 0 to disable feature.
   std::chrono::milliseconds client_readers_flow_tracer_period;
+
+  // (client-only setting) Number of sample groups to maintain for the lagging
+  // metric.
+  size_t client_readers_flow_tracer_lagging_metric_num_sample_groups;
+
+  // (client-only setting) Size of a sample group for the lagging metric.
+  size_t client_readers_flow_tracer_lagging_metric_sample_group_size;
+
+  // (client-only setting) Minimum admissible slope to consider a reader as
+  // lagging.
+  double client_readers_flow_tracer_lagging_slope_threshold;
 
   // (client-only setting) Force instantiation of StatsHolder within
   // ClientImpl even if stats publishing is disabled (via
@@ -839,6 +856,10 @@ struct Settings : public SettingsBundle {
   // If true, cluster will keep track of logs byte offsets.
   // NOTE: this involve extra work for storage nodes during recovery.
   bool byte_offsets;
+
+  // If true, cluster will use OffsetMap to keep track of logs offsets.
+  // NOTE: this involve extra work for storage nodes during recovery.
+  bool enable_offset_map;
 
   // With config synchronization enabled, nodes on both ends of a connection
   // will synchronize their configs if there is a mismatch in the config

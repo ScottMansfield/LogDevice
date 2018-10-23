@@ -6,12 +6,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include "DeleteLogMetadataRequest.h"
-#include "logdevice/common/Worker.h"
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/Sender.h"
-#include "logdevice/common/NodeID.h"
+
 #include <algorithm>
 #include <iterator>
+
+#include "logdevice/common/NodeID.h"
+#include "logdevice/common/Sender.h"
+#include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 
 namespace facebook { namespace logdevice {
 
@@ -34,8 +36,7 @@ DeleteLogMetadataRequest::DeleteLogMetadataRequest(
 }
 
 void DeleteLogMetadataRequest::initTimer() {
-  request_timer_ = std::make_unique<LibeventTimer>(
-      Worker::onThisThread()->getEventBase(), [this] { this->onTimeout(); });
+  request_timer_ = std::make_unique<Timer>([this] { this->onTimeout(); });
 
   std::chrono::milliseconds delay(
       Worker::settings().delete_log_metadata_request_timeout.count());

@@ -178,9 +178,12 @@ AllClientReadStreams::getAllReadStreamsDebugInfo(bool pretty,
                                    "Shards Down",
                                    "Shards Slow",
                                    "Bytes Lagged",
-                                   "Bytes Lagged Delta",
                                    "Timestamp Lagged",
-                                   "Timestamp Lagged Delta");
+                                   "Last Time Lagging",
+                                   "Last Time Stuck",
+                                   "Last Reported State",
+                                   "Last Tail Info",
+                                   "Time Lag Record");
 
   auto tables = run_on_all_workers(&processor, [&]() {
     InfoClientReadStreamsTable t(table);

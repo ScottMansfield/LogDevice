@@ -19,15 +19,14 @@
 #include "logdevice/common/debug.h"
 #include "logdevice/common/stats/PerShardHistograms.h"
 #include "logdevice/common/stats/Stats.h"
+#include "logdevice/server/IOFaultInjection.h"
 #include "logdevice/server/locallogstore/LocalLogStore.h"
 #include "logdevice/server/locallogstore/WriteOps.h"
-#include "logdevice/server/IOFaultInjection.h"
 #include "logdevice/server/storage_tasks/StorageTaskResponse.h"
 #include "logdevice/server/storage_tasks/StorageThreadPool.h"
 #include "logdevice/server/storage_tasks/WriteStorageTask.h"
 
 namespace facebook { namespace logdevice {
-
 
 void WriteBatchStorageTask::execute() {
   using namespace std::chrono_literals;
@@ -77,6 +76,19 @@ void WriteBatchStorageTask::execute() {
       sendBackToWorker(std::move(write));
 
       ld_check(!write); // NOTE: ref to unique_ptr in `writes'
+      continue;
+    }
+
+    // if the lsn of the record is before the local trim point, return success.
+    // this is an optimization to avoid writing to RocksDB since such records
+    // cannot be read anyways. This can happen during rebuilding since a lot of
+    // records with older lsns are written
+    if (write->isLsnBeforeTrimPoint()) {
+      write->status_ = E::OK;
+      sendBackToWorker(std::move(write));
+
+      ld_check(!write); // NOTE: ref to unique_ptr in `writes'
+      STAT_INCR(stats(), skipped_record_lsn_before_trim_point);
       continue;
     }
 

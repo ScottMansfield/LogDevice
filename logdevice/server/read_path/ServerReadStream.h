@@ -11,7 +11,6 @@
 #include <memory>
 
 #include <boost/intrusive/set.hpp>
-
 #include <folly/AtomicIntrusiveLinkedList.h>
 #include <folly/IntrusiveList.h>
 
@@ -21,8 +20,8 @@
 #include "logdevice/common/SCDCopysetReordering.h"
 #include "logdevice/common/ServerRecordFilter.h"
 #include "logdevice/common/SimpleEnumMap.h"
-#include "logdevice/common/configuration/TrafficClass.h"
 #include "logdevice/common/WeakRefHolder.h"
+#include "logdevice/common/configuration/TrafficClass.h"
 #include "logdevice/common/protocol/START_Message.h"
 #include "logdevice/include/Record.h"
 #include "logdevice/include/strong_typedef.h"
@@ -472,16 +471,11 @@ class ServerReadStream : boost::noncopyable {
   // onSent handler
   std::shared_ptr<std::string> log_group_path_;
 
-  enum class RecordSource {
-    REAL_TIME,    //
-    NON_BLOCKING, //
-    BLOCKING,     //
-    MAX
-  };
+  enum class RecordSource { REAL_TIME, NON_BLOCKING, BLOCKING, MAX };
 
   static const SimpleEnumMap<RecordSource, const char*> names;
 
-  void noteSent(StatsHolder* stats, RecordSource);
+  void noteSent(StatsHolder* stats, RecordSource, size_t msg_size_bytes_approx);
 
  private:
   // LSN to read from next time we try to read a batch of records

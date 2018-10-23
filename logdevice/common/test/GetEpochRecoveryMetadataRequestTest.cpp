@@ -5,16 +5,17 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/GetEpochRecoveryMetadataRequest.h"
+
 #include <gtest/gtest.h>
 
-#include "logdevice/common/GetEpochRecoveryMetadataRequest.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/test/MockBackoffTimer.h"
-#include "logdevice/common/test/MockLibeventTimer.h"
-#include "logdevice/common/test/NodeSetTestUtil.h"
-#include "logdevice/common/test/TestUtil.h"
 #include "logdevice/common/LinearCopySetSelector.h"
 #include "logdevice/common/Random.h"
+#include "logdevice/common/settings/Settings.h"
+#include "logdevice/common/test/MockBackoffTimer.h"
+#include "logdevice/common/test/MockTimer.h"
+#include "logdevice/common/test/NodeSetTestUtil.h"
+#include "logdevice/common/test/TestUtil.h"
 
 namespace facebook { namespace logdevice {
 
@@ -81,7 +82,7 @@ class GetEpochRecoveryMetadataRequestTest : public ::testing::Test {
     auto logs_config = std::make_shared<configuration::LocalLogsConfig>();
     NodeSetTestUtil::addLog(logs_config.get(), kLogID, 1, 0, 1, {});
     config_ = std::make_shared<Configuration>(
-        ServerConfig::fromData(
+        ServerConfig::fromDataTest(
             "GetEpochRecoveryMetadataRequestTest", std::move(nodes_config)),
         std::move(logs_config));
     int i = 0;
@@ -189,7 +190,7 @@ class MockedNodeSetAccessor : public StorageSetAccessor {
     rng_ = test->rng_wrapper_.get();
   }
 
-  std::unique_ptr<LibeventTimer>
+  std::unique_ptr<Timer>
   createJobTimer(std::function<void()> /*callback*/) override {
     return nullptr;
   }
@@ -254,7 +255,7 @@ class MockGetEpochRecoveryMetadataRequest
   void deleteThis() override {}
 
   void fireDeferredCompleteTimer() {
-    static_cast<MockLibeventTimer*>(deferredCompleteTimer_.get())->trigger();
+    static_cast<MockTimer*>(deferredCompleteTimer_.get())->trigger();
   }
 
   std::unique_ptr<StorageSetAccessor> makeStorageSetAccessor(
@@ -277,17 +278,18 @@ class MockGetEpochRecoveryMetadataRequest
     return std::make_unique<MockBackoffTimer>();
   }
 
-  std::unique_ptr<LibeventTimer> createDeferredCompleteTimer() override {
+  std::unique_ptr<Timer>
+  createDeferredCompleteTimer(std::function<void()> cb) override {
     ld_check(!test_->deferredCompleteTimerCreated_);
     test_->deferredCompleteTimerCreated_ = true;
-    return std::make_unique<MockLibeventTimer>();
+    return std::make_unique<MockTimer>(cb);
   }
 
   void activateDeferredCompleteTimer() override {
     ASSERT_FALSE(test_->deferredCompleteTimerActivated_);
     test_->deferredCompleteTimerActivated_ = true;
-    dynamic_cast<MockLibeventTimer*>(deferredCompleteTimer_.get())
-        ->activate(nullptr);
+    dynamic_cast<MockTimer*>(deferredCompleteTimer_.get())
+        ->activate(std::chrono::microseconds(0));
   }
 
   void deferredComplete() override {

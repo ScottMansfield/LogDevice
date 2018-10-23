@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "logdevice/common/PluginPack.h"
 #include "logdevice/common/SampledTracer.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/Record.h"

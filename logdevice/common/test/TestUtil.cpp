@@ -15,9 +15,6 @@
 #include <fstream>
 #include <ifaddrs.h>
 #include <memory>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
 #include <thread>
 #include <unistd.h>
 
@@ -25,20 +22,25 @@
 #include <folly/Memory.h>
 #include <folly/String.h>
 #include <folly/dynamic.h>
-#include <folly/json.h>
 #include <folly/experimental/TestUtil.h>
-#include "logdevice/common/LibeventTimer.h"
+#include <folly/json.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+
+#include "logdevice/common/LegacyPluginPack.h"
 #include "logdevice/common/NoopTraceLogger.h"
 #include "logdevice/common/PermissionChecker.h"
-#include "logdevice/common/PluginPack.h"
 #include "logdevice/common/PrincipalParser.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/ReaderImpl.h"
 #include "logdevice/common/SequencerLocator.h"
-#include "logdevice/common/settings/Settings.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/configuration/ConfigParser.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/plugin/CommonBuiltinPlugins.h"
 #include "logdevice/common/protocol/MessageTypeNames.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/util.h"
 #include "logdevice/include/Reader.h"
 
@@ -226,7 +228,7 @@ createSimpleConfig(ServerConfig::NodesConfig nodes, size_t logs) {
   ServerConfig::MetaDataLogsConfig meta_config =
       createMetaDataLogsConfig(nodes, 1, 1);
 
-  auto server_config = ServerConfig::fromData(__FILE__, nodes, meta_config);
+  auto server_config = ServerConfig::fromDataTest(__FILE__, nodes, meta_config);
   return std::make_shared<Configuration>(
       std::move(server_config), std::move(logs_config));
 }
@@ -363,15 +365,32 @@ bool testsShouldLeaveData() {
   return getenv_switch("LOGDEVICE_TEST_LEAVE_DATA");
 }
 
-class TestPluginPack : public PluginPack {
+class TestPluginPack : public virtual LegacyPluginPack, public virtual Plugin {
  public:
+  Type type() const override {
+    return Type::LEGACY_CLIENT_PLUGIN;
+  }
+
+  std::string identifier() const override {
+    return PluginRegistry::kBuiltin().str();
+  }
+
+  std::string displayName() const override {
+    return description();
+  }
+
   virtual const char* description() const override {
     return "testing plugin";
   }
 };
 
-std::shared_ptr<PluginPack> make_test_plugin_pack() {
+std::shared_ptr<LegacyPluginPack> make_test_plugin_pack() {
   return std::make_shared<TestPluginPack>();
+}
+
+std::shared_ptr<PluginRegistry> make_test_plugin_registry() {
+  return std::make_shared<PluginRegistry>(
+      createAugmentedCommonBuiltinPluginVector<TestPluginPack>());
 }
 
 std::shared_ptr<Processor>
@@ -386,7 +405,8 @@ make_test_processor(const Settings& settings,
                            UpdateableSettings<Settings>(settings),
                            stats,
                            nullptr,
-                           make_test_plugin_pack());
+                           make_test_plugin_pack(),
+                           make_test_plugin_registry());
 }
 
 const char* verifyFileExists(const char* filename) {

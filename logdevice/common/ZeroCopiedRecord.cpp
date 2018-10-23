@@ -10,9 +10,9 @@
 #include <algorithm>
 #include <cstring>
 
-#include "logdevice/common/debug.h"
 #include "logdevice/common/PayloadHolder.h"
 #include "logdevice/common/ZeroCopiedRecordDisposal.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/include/Err.h"
 
 namespace facebook { namespace logdevice {
@@ -26,6 +26,7 @@ ZeroCopiedRecord::ZeroCopiedRecord(
     esn_t last_known_good,
     uint32_t wave_or_recovery_epoch,
     const copyset_t& copyset,
+    // TODO(T33977412)
     uint64_t offset_within_epoch,
     std::map<KeyType, std::string>&& keys,
     Slice payload_raw,
@@ -36,6 +37,7 @@ ZeroCopiedRecord::ZeroCopiedRecord(
       last_known_good(last_known_good),
       wave_or_recovery_epoch(wave_or_recovery_epoch),
       copyset(copyset),
+      // TODO(T33977412)
       offset_within_epoch(offset_within_epoch),
       keys(std::move(keys)),
       payload_raw(payload_raw),

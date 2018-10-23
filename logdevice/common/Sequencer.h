@@ -22,11 +22,10 @@
 #include "logdevice/common/ResourceBudget.h"
 #include "logdevice/common/Seal.h"
 #include "logdevice/common/SequencerMetaDataLogManager.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/UpdateableSharedPtr.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
-
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/LogTailAttributes.h"
 
@@ -714,6 +713,9 @@ class Sequencer {
     RECOVERY
   };
 
+  // Modes for getting historical metadata
+  enum class GetHistoricalMetaDataMode { IMMEDIATE, PERIODIC };
+
   // exposes epoch sequencers for testing, pair.first is the current epoch
   // sequencer, while pair.second is the draining epoch sequencer
   std::pair<std::shared_ptr<EpochSequencer>, std::shared_ptr<EpochSequencer>>
@@ -734,7 +736,7 @@ class Sequencer {
   virtual void finalizeDraining(DrainedAction action);
 
   // read historical metadata from the metadata log
-  virtual void getHistoricalMetaData();
+  virtual void getHistoricalMetaData(GetHistoricalMetaDataMode mode);
 
  private:
   // EpochSequencers currently maintained by the Sequencer, one for the

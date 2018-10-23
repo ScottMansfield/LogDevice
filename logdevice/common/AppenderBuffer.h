@@ -7,13 +7,14 @@
  */
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <queue>
 #include <unordered_map>
-#include <memory>
-#include <functional>
-#include "logdevice/include/types.h"
+
 #include "logdevice/common/Appender.h"
-#include "logdevice/common/LibeventTimer.h"
+#include "logdevice/common/Timer.h"
+#include "logdevice/include/types.h"
 
 namespace facebook { namespace logdevice {
 
@@ -173,7 +174,7 @@ class AppenderBufferQueue {
   // This timer is used when the queue of pending Appender objects is
   // sufficiently large, we need to periodically return to libevent loop
   // to prevent it from running out of output buffers
-  LibeventTimer process_timer_;
+  Timer process_timer_;
 
   // Current callback to process the queue, used to resume processing
   // upon timer fired

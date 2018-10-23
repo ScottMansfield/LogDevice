@@ -8,11 +8,12 @@
 #include "GOSSIP_Message.h"
 
 #include <memory>
+
 #include <folly/small_vector.h>
 
-#include "logdevice/common/debug.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/ProtocolReader.h"
 #include "logdevice/common/protocol/ProtocolWriter.h"
 #include "logdevice/common/stats/ServerHistograms.h"
@@ -74,10 +75,7 @@ void GOSSIP_Message::serialize(ProtocolWriter& writer) const {
     writer.writeVector(failover_list_);
   }
 
-  if (writer.proto() >= Compatibility::ProtocolVersion::GOSSIP_WITH_BOYCOTT) {
-    writeBoycottList(writer);
-  }
-
+  writeBoycottList(writer);
   writeSuspectMatrix(writer);
 }
 
@@ -96,9 +94,7 @@ MessageReadResult GOSSIP_Message::deserialize(ProtocolReader& reader) {
     reader.readVector(&msg->failover_list_, msg->num_nodes_);
   }
 
-  if (reader.proto() >= Compatibility::ProtocolVersion::GOSSIP_WITH_BOYCOTT) {
-    msg->readBoycottList(reader);
-  }
+  msg->readBoycottList(reader);
 
   if (reader.ok() && reader.bytesRemaining() > 0) {
     msg->readSuspectMatrix(reader);

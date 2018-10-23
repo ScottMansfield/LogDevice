@@ -5,6 +5,8 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/server/locallogstore/PartitionedRocksDBStore.h"
+
 #include <algorithm>
 #include <fstream>
 #include <future>
@@ -12,27 +14,24 @@
 #include <queue>
 #include <set>
 
-#include <gtest/gtest.h>
-
-#include "rocksdb/db.h"
-#include <rocksdb/sst_file_manager.h>
-
 #include <folly/Random.h>
 #include <folly/Varint.h>
+#include <gtest/gtest.h>
+#include <rocksdb/sst_file_manager.h>
 
+#include "logdevice/common/EventLoopHandle.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/NodeID.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/ThreadID.h"
 #include "logdevice/common/configuration/InternalLogs.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/debug.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/SettingsUpdater.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/common/util.h"
 #include "logdevice/server/ServerProcessor.h"
 #include "logdevice/server/locallogstore/PartitionMetadata.h"
-#include "logdevice/server/locallogstore/PartitionedRocksDBStore.h"
 #include "logdevice/server/locallogstore/RocksDBCompactionFilter.h"
 #include "logdevice/server/locallogstore/RocksDBEnv.h"
 #include "logdevice/server/locallogstore/RocksDBKeyFormat.h"
@@ -40,9 +39,9 @@
 #include "logdevice/server/locallogstore/RocksDBWriterMergeOperator.h"
 #include "logdevice/server/locallogstore/WriteOps.h"
 #include "logdevice/server/locallogstore/test/TemporaryLogStore.h"
-#include "logdevice/common/EventLoopHandle.h"
 #include "logdevice/server/read_path/LogStorageStateMap.h"
 #include "logdevice/server/storage_tasks/StorageThreadPool.h"
+#include "rocksdb/db.h"
 
 using namespace facebook::logdevice;
 using RocksDBKeyFormat::CopySetIndexKey;
@@ -983,6 +982,7 @@ class PartitionedRocksDBStoreTest : public ::testing::Test {
         Slice payload(&payloads[i][0], payloads[i].size());
         Slice csi_entry = LocalLogStoreRecordFormat::formCopySetIndexEntry(
             hdr,
+            STORE_Extra(),
             csi_copyset.data(),
             LSN_INVALID,
             shardIdInCopySet(),
@@ -1178,7 +1178,7 @@ class PartitionedRocksDBStoreTest : public ::testing::Test {
       std::unique_ptr<rocksdb::Iterator> it(db->NewIterator(
           RocksDBLogStoreBase::getDefaultReadOptions(), cf_handles[i].get()));
       for (it->Seek(first_key_slice); it->Valid(); it->Next()) {
-        EXPECT_EQ(sizeof(DataKey), it->key().size());
+        EXPECT_EQ(DataKey::sizeForWriting(), it->key().size());
         EXPECT_TRUE(DataKey::valid(it->key().data(), it->key().size()));
         EXPECT_EQ(1, extractWave(*it));
 
@@ -1692,15 +1692,8 @@ TEST_F(PartitionedRocksDBStoreTest, ReadOnlyWritesCrash) {
   s["rocksdb-read-only"] = "true";
   openStore(s);
 
-#ifdef NDEBUG
-  // Verify that write failed
-  put({TestRecord(logid, 40)},
-      /*csi_copyset=*/{},
-      /*assert_write_fail=*/true);
-#else
-  // Assertions should get hit
+  // ld_check should get hit
   ASSERT_DEATH(put({TestRecord(logid, 40)}), "");
-#endif
 }
 
 TEST_F(PartitionedRocksDBStoreTest, TailingIterator) {
@@ -8453,4 +8446,75 @@ TEST_F(PartitionedRocksDBStoreTest, StallLowPriWritesShutdownTest) {
     EXPECT_TRUE(thread_unstalled);
   });
   stallLowPriWriteThread.join();
+}
+
+TEST_F(PartitionedRocksDBStoreTest, InterleavingCompactions) {
+  using PartitionToCompact = PartitionedRocksDBStore::PartitionToCompact;
+  using Reason = PartitionedRocksDBStore::PartitionToCompact::Reason;
+  using Partition = PartitionedRocksDBStore::Partition;
+  using PartitionPtr = PartitionedRocksDBStore::PartitionPtr;
+
+  std::vector<PartitionPtr> ps(10);
+  for (partition_id_t i = 1; i < ps.size(); ++i) {
+    ps[i] = std::make_shared<Partition>(i, nullptr, RecordTimestamp::min());
+  }
+
+  std::vector<PartitionToCompact> c;
+
+  auto check = [&](size_t num_pairs,
+                   std::initializer_list<std::pair<PartitionPtr, Reason>> il) {
+    std::vector<std::pair<PartitionPtr, Reason>> ex(il.begin(), il.end());
+    ASSERT_EQ(ex.size(), c.size());
+    for (size_t i = 0; i < c.size(); ++i) {
+      // Allow either order in each pair.
+      if (i < num_pairs * 2 && i % 2 == 0 && ex[i].second != c[i].reason) {
+        swap(ex[i], ex[i + 1]);
+      }
+      EXPECT_EQ(ex[i].first->id_, c[i].partition->id_);
+      EXPECT_EQ(ex[i].second, c[i].reason);
+    }
+  };
+
+  c = {{ps[1], Reason::MANUAL},
+       {ps[2], Reason::MANUAL},
+       {ps[3], Reason::PARTIAL},
+       {ps[4], Reason::PARTIAL},
+       {ps[5], Reason::PARTIAL},
+       {ps[6], Reason::PROACTIVE}};
+  PartitionToCompact::interleavePartialAndNormalCompactions(&c);
+  check(2,
+        {{ps[1], Reason::MANUAL},
+         {ps[3], Reason::PARTIAL},
+         {ps[2], Reason::MANUAL},
+         {ps[4], Reason::PARTIAL},
+         {ps[5], Reason::PARTIAL},
+         {ps[6], Reason::PROACTIVE}});
+
+  c = {{ps[1], Reason::MANUAL},
+       {ps[2], Reason::MANUAL},
+       {ps[3], Reason::MANUAL},
+       {ps[4], Reason::PARTIAL},
+       {ps[5], Reason::PARTIAL},
+       {ps[6], Reason::PROACTIVE}};
+  PartitionToCompact::interleavePartialAndNormalCompactions(&c);
+  check(2,
+        {{ps[1], Reason::MANUAL},
+         {ps[4], Reason::PARTIAL},
+         {ps[2], Reason::MANUAL},
+         {ps[5], Reason::PARTIAL},
+         {ps[3], Reason::MANUAL},
+         {ps[6], Reason::PROACTIVE}});
+
+  c = {{ps[1], Reason::MANUAL},
+       {ps[2], Reason::MANUAL},
+       {ps[3], Reason::PROACTIVE}};
+  PartitionToCompact::interleavePartialAndNormalCompactions(&c);
+  check(0,
+        {{ps[1], Reason::MANUAL},
+         {ps[2], Reason::MANUAL},
+         {ps[3], Reason::PROACTIVE}});
+
+  c = {};
+  PartitionToCompact::interleavePartialAndNormalCompactions(&c);
+  check(0, {});
 }

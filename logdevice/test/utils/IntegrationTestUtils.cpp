@@ -11,22 +11,20 @@
 #include <ifaddrs.h>
 #include <signal.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 
-#include <folly/dynamic.h>
 #include <folly/FileUtil.h>
-#include <folly/json.h>
 #include <folly/Memory.h>
 #include <folly/Optional.h>
 #include <folly/ScopeGuard.h>
 #include <folly/String.h>
 #include <folly/Subprocess.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "logdevice/common/CheckSealRequest.h"
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/EpochMetaDataUpdater.h"
 #include "logdevice/common/FileConfigSource.h"
 #include "logdevice/common/FileConfigSourceThread.h"
@@ -36,25 +34,28 @@
 #include "logdevice/common/NodeSetSelectorFactory.h"
 #include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/StaticSequencerLocator.h"
-#include "logdevice/common/configuration/TextConfigUpdater.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/InternalLogs.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/TextConfigUpdater.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/event_log/EventLogRebuildingSet.h"
-#include "logdevice/lib/ClientSettingsImpl.h"
-#include "logdevice/lib/ClientPluginPack.h"
-#include "logdevice/server/locallogstore/LocalLogStore.h"
-
+#include "logdevice/common/plugin/PluginRegistry.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/Client.h"
 #include "logdevice/include/ClientSettings.h"
+#include "logdevice/lib/ClientBuiltinPluginProvider.h"
 #include "logdevice/lib/ClientImpl.h"
+#include "logdevice/lib/ClientPluginPack.h"
+#include "logdevice/lib/ClientSettingsImpl.h"
 #include "logdevice/lib/ops/EventLogUtils.h"
+#include "logdevice/server/locallogstore/LocalLogStore.h"
 #include "logdevice/server/locallogstore/RocksDBLogStoreBase.h"
 #include "logdevice/server/locallogstore/ShardedRocksDBLocalLogStore.h"
 #include "logdevice/server/locallogstore/test/StoreUtil.h"
+#include "logdevice/test/utils/ServerInfo.h"
 #include "logdevice/test/utils/nc.h"
 #include "logdevice/test/utils/port_selection.h"
-#include "logdevice/test/utils/ServerInfo.h"
 
 using facebook::logdevice::configuration::LocalLogsConfig;
 
@@ -107,6 +108,7 @@ Cluster::Cluster(std::string root_path,
   auto updater =
       std::make_shared<TextConfigUpdater>(config_->updateableServerConfig(),
                                           config_->updateableLogsConfig(),
+                                          config_->updateableZookeeperConfig(),
                                           impl_settings->getSettings());
 
   // Client should update its settings from the config file
@@ -131,6 +133,7 @@ Cluster::Cluster(std::string root_path,
   // Config reading shouldn't fail, we just generated it
   ld_check(config_->get() && "Invalid initial config");
   config_->updateableServerConfig()->setUpdater(updater);
+  config_->updateableZookeeperConfig()->setUpdater(updater);
   if (!impl_settings->getSettings()->enable_logsconfig_manager) {
     config_->updateableLogsConfig()->setUpdater(updater);
   } else {
@@ -412,17 +415,16 @@ std::unique_ptr<Cluster> ClusterFactory::create(int nnodes) {
   }
 
   auto config = std::make_unique<Configuration>(
-      ServerConfig::fromData(cluster_name_,
-                             std::move(nodes_config),
-                             std::move(meta_config),
-                             ServerConfig::PrincipalsConfig(),
-                             ServerConfig::SecurityConfig(),
-                             ServerConfig::TraceLoggerConfig(),
-                             std::move(ts_config),
-                             ServerConfig::ZookeeperConfig(),
-                             std::move(server_settings),
-                             std::move(client_settings),
-                             internal_logs_),
+      ServerConfig::fromDataTest(cluster_name_,
+                                 std::move(nodes_config),
+                                 std::move(meta_config),
+                                 ServerConfig::PrincipalsConfig(),
+                                 ServerConfig::SecurityConfig(),
+                                 ServerConfig::TraceLoggerConfig(),
+                                 std::move(ts_config),
+                                 std::move(server_settings),
+                                 std::move(client_settings),
+                                 internal_logs_),
       enable_logsconfig_manager_ ? nullptr : logs_config);
   logs_config->setInternalLogsConfig(
       config->serverConfig()->getInternalLogsConfig());
@@ -2051,6 +2053,11 @@ Cluster::createClient(std::chrono::milliseconds timeout,
     settings->set("enable-logsconfig-manager", "true");
   }
 
+  std::shared_ptr<PluginRegistry> plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
+  ld_info(
+      "Plugins loaded: %s", plugin_registry->getStateDescriptionStr().c_str());
+
   return std::make_shared<ClientImpl>(cluster_name_,
                                       config_,
                                       credentials,
@@ -2058,7 +2065,7 @@ Cluster::createClient(std::chrono::milliseconds timeout,
                                       timeout,
                                       std::move(settings),
                                       std::move(sequencer_locator),
-                                      load_client_plugin());
+                                      plugin_registry);
 }
 
 std::shared_ptr<Client>

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <memory>
 
+#include "SafetyAPI.h"
 #include "logdevice/common/EpochMetaData.h"
 #include "logdevice/common/FailureDomainNodeSet.h"
 #include "logdevice/common/NodeSetFinder.h"
@@ -17,12 +18,9 @@
 #include "logdevice/common/ShardAuthoritativeStatusMap.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/configuration/Configuration.h"
-
-#include "logdevice/include/types.h"
-#include "logdevice/include/Record.h"
 #include "logdevice/include/Err.h"
-
-#include "SafetyAPI.h"
+#include "logdevice/include/Record.h"
+#include "logdevice/include/types.h"
 
 namespace facebook { namespace logdevice {
 
@@ -34,17 +32,20 @@ class ClientImpl;
 class CheckMetaDataLogRequest : public Request {
  public:
   // callback function called when the operation is complete
-  // The epoch_t and StorageSet parameters are valid only if Status == E::FAILED
-  using Callback = std::function<void(Status,
-                                      int, // impact result bit set
-                                      logid_t,
-                                      epoch_t,
-                                      StorageSet,
-                                      std::string)>;
+  // The epoch_t and StorageSet parameters are valid only if Status != E::OK
+  using Callback = folly::Function<void(
+      Status,
+      int, // impact result bit set
+      logid_t,
+      epoch_t,    // Which epoch in logid_t has failed the safety check
+      StorageSet, // The storage set that caused the failure (if st != E::OK)
+      ReplicationProperty // The replication property for the offending epoch
+      )>;
 
   /**
    * create a CheckMetaDataLogRequest. CheckMetaDataLogRequest verifies that
-   * it is safe to perform 'operations' on op_shards.
+   * it is safe to set the storage state to 'target_storage_state' for
+   op_shards.
    * If it is data log (check_metadata=false) it reads corresponding metadata
    * log records by record to do so.
    * If check_metadata=true, it ignores log_id and verifies we have enough nodes
@@ -52,12 +53,13 @@ class CheckMetaDataLogRequest : public Request {
    *
    *  @param log_id          data log id to perform check. Ignored
    *                         if check_metadata=true
-   *  @param timeout         Timout to use
-   *  @param config          cluster configuration
+   *  @param timeout         Timeout to use
    *  @param shard_status    shard authoritative status map
    *  @param op_shards       check those shards if it is safe to perform
    *                         operations on them
-   *  @param operations      bitset of operations to check
+   *  @param target_storage_state
+   *                         The configuration::StorageState that we want
+   *                         to set
    *  @safety_margin         safety margin (number of domains in each scope)
                              which we could afford to lose after operations
    *  @param abort_on_error  abort on the first problem detected
@@ -66,22 +68,24 @@ class CheckMetaDataLogRequest : public Request {
    */
   CheckMetaDataLogRequest(logid_t log_id,
                           std::chrono::milliseconds timeout,
-                          std::shared_ptr<Configuration> config,
-                          const ShardAuthoritativeStatusMap& shard_status,
-                          std::shared_ptr<ShardSet> op_shards,
-                          int operations,
-                          const SafetyMargin* safety_margin,
+                          ShardAuthoritativeStatusMap shard_status,
+                          ShardSet op_shards,
+                          configuration::StorageState target_storage_state,
+                          SafetyMargin safety_margin,
                           bool check_meta_nodeset,
+                          WorkerType worker_type_,
                           Callback callback);
 
   ~CheckMetaDataLogRequest() override;
 
+  WorkerType getWorkerTypeAffinity() override;
+
   Request::Execution execute() override;
   void complete(Status st,
-                int, // impact result bit set
-                epoch_t error_epoch,
-                StorageSet storage_set,
-                std::string message);
+                int = Impact::ImpactResult::INVALID, // impact result bit set
+                epoch_t error_epoch = EPOCH_INVALID,
+                StorageSet storage_set = {},
+                ReplicationProperty replication = ReplicationProperty());
 
   /*
    * Instructs this utility to not assume the server is recent enough to be able
@@ -147,7 +151,6 @@ class CheckMetaDataLogRequest : public Request {
   std::chrono::milliseconds timeout_;
   // TODO(T28386689): remove once all production tiers are on 2.35.
   bool read_epoch_metadata_from_sequencer_ = false;
-  std::shared_ptr<Configuration> config_;
 
   std::unique_ptr<NodeSetFinder> nodeset_finder_;
 
@@ -155,16 +158,17 @@ class CheckMetaDataLogRequest : public Request {
   worker_id_t current_worker_{-1};
 
   ShardAuthoritativeStatusMap shard_status_;
-  std::shared_ptr<ShardSet> op_shards_;
-  int operations_;
+  ShardSet op_shards_;
+  configuration::StorageState target_storage_state_;
 
   // safety margin for each replication scope
   // we consider operations safe, only if after draining/stopping
   // we would still have extra (safety margin) domains to loose in each scope
   // lifetime managed by SafetyChecker
-  const SafetyMargin* safety_margin_;
+  SafetyMargin safety_margin_;
 
   const bool check_metadata_nodeset_;
+  WorkerType worker_type_;
   // callback function provided by user of the class. Called when the state
   // machine completes.
   Callback callback_;

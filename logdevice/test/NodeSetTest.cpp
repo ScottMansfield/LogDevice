@@ -7,24 +7,25 @@
  */
 #include <thread>
 #include <unistd.h>
-#include <gtest/gtest.h>
 
 #include <folly/Memory.h>
 #include <folly/Random.h>
+#include <gtest/gtest.h>
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/Digest.h"
 #include "logdevice/common/EpochMetaDataMap.h"
 #include "logdevice/common/EpochMetaDataUpdater.h"
 #include "logdevice/common/EpochStore.h"
 #include "logdevice/common/FileEpochStore.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
-#include "logdevice/common/Metadata.h"
 #include "logdevice/common/MetaDataLog.h"
+#include "logdevice/common/Metadata.h"
 #include "logdevice/common/NodeSetSelectorFactory.h"
 #include "logdevice/common/Semaphore.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/configuration/ConfigParser.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/test/TestNodeSetSelector.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/Client.h"
@@ -33,8 +34,6 @@
 #include "logdevice/server/locallogstore/test/StoreUtil.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
 #include "logdevice/test/utils/IntegrationTestUtils.h"
-
-#include "logdevice/common/debug.h"
 
 #define N0 ShardID(0, 0)
 #define N1 ShardID(1, 0)
@@ -313,28 +312,28 @@ void NodeSetTest::markMetaDataWrittenInEpochStore(logid_t log) {
   } while (0)
 
 // change nodeset and replication factor
-#define CHANGE_STORAGE_SET_REPLICATION(replication, ...)                   \
-  do {                                                                     \
-    replication_ = (replication);                                          \
-    auto logs_config =                                                     \
-        cluster_->getConfig()->getLocalLogsConfig()->copyLocal();          \
-    auto iter = logs_config->getLogMap().find(LOG_ID.val_);                \
-    ASSERT_NE(logs_config->getLogMap().end(), iter);                       \
-    const logsconfig::LogGroupNode* log = iter->second.log_group.get();    \
-    logsconfig::LogGroupNode new_node = log->withLogAttributes(            \
-        log->attrs().with_replicationFactor(replication));                 \
-    bool result = logs_config->replaceLogGroup(                            \
-        iter->second.getFullyQualifiedName(), new_node);                   \
-    ld_check(result);                                                      \
-    cluster_->writeLogsConfig(logs_config.get());                          \
-    cluster_->waitForConfigUpdate();                                       \
-    auto attrs =                                                           \
-        cluster_->getConfig()->get()->getLogGroupByIDRaw(LOG_ID)->attrs(); \
-    ASSERT_EQ(replication_, attrs.replicationFactor().value());            \
-    storage_set_ = StorageSet{__VA_ARGS__};                                \
-    updateMetaDataInEpochStore();                                          \
-    writeMetaDataLog();                                                    \
-    markMetaDataWrittenInEpochStore();                                     \
+#define CHANGE_STORAGE_SET_REPLICATION(replication, ...)                      \
+  do {                                                                        \
+    replication_ = (replication);                                             \
+    auto logs_config =                                                        \
+        cluster_->getConfig()->getLocalLogsConfig()->copyLocal();             \
+    auto iter = logs_config->getLogMap().find(LOG_ID.val_);                   \
+    ASSERT_NE(logs_config->getLogMap().end(), iter);                          \
+    const logsconfig::LogGroupNode* log = iter->second.log_group.get();       \
+    logsconfig::LogGroupNode new_node = log->withLogAttributes(               \
+        log->attrs().with_replicationFactor(replication));                    \
+    bool result = logs_config->replaceLogGroup(                               \
+        iter->second.getFullyQualifiedName(), new_node);                      \
+    ld_check(result);                                                         \
+    cluster_->writeLogsConfig(logs_config.get());                             \
+    cluster_->waitForConfigUpdate();                                          \
+    auto attrs =                                                              \
+        cluster_->getConfig()->get()->getLogGroupByIDShared(LOG_ID)->attrs(); \
+    ASSERT_EQ(replication_, attrs.replicationFactor().value());               \
+    storage_set_ = StorageSet{__VA_ARGS__};                                   \
+    updateMetaDataInEpochStore();                                             \
+    writeMetaDataLog();                                                       \
+    markMetaDataWrittenInEpochStore();                                        \
   } while (0)
 
 #define ASSERT_READ_RESULT(lsn_map, records)         \

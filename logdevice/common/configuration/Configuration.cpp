@@ -7,14 +7,14 @@
  */
 #include "Configuration.h"
 
-#include <folly/synchronization/Baton.h>
 #include <boost/filesystem.hpp>
+#include <folly/synchronization/Baton.h>
 
 #include "logdevice/common/configuration/InternalLogs.h"
-#include "logdevice/common/configuration/ServerConfig.h"
-#include "logdevice/common/configuration/MetaDataLogsConfig.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/MetaDataLogsConfig.h"
 #include "logdevice/common/configuration/ParsingHelpers.h"
+#include "logdevice/common/configuration/ServerConfig.h"
 
 using namespace facebook::logdevice::configuration::parser;
 using namespace facebook::logdevice::configuration;
@@ -32,10 +32,14 @@ Configuration::getLocalLogsConfig() const {
   return *localLogsConfig().get();
 }
 
-Configuration::Configuration(std::shared_ptr<ServerConfig> server_config,
-                             std::shared_ptr<LogsConfig> logs_config)
+Configuration::Configuration(
+    std::shared_ptr<ServerConfig> server_config,
+    std::shared_ptr<LogsConfig> logs_config,
+    std::shared_ptr<facebook::logdevice::configuration::ZookeeperConfig>
+        zookeeper_config)
     : server_config_(std::move(server_config)),
-      logs_config_(std::move(logs_config)) {}
+      logs_config_(std::move(logs_config)),
+      zookeeper_config_(std::move(zookeeper_config)) {}
 
 std::shared_ptr<LogsConfig::LogGroupNode>
 Configuration::getLogGroupByIDShared(logid_t id) const {
@@ -76,21 +80,6 @@ void Configuration::getLogGroupByIDAsync(
     return;
   } else {
     logs_config_->getLogGroupByIDAsync(id, cb);
-  }
-}
-
-const LogsConfig::LogGroupNode*
-Configuration::getLogGroupByIDRaw(logid_t id) const {
-  // raw access is only supported by the local config.
-  ld_check(logs_config_->isLocal());
-  if (MetaDataLog::isMetaDataLog(id)) {
-    return server_config_->getMetaDataLogGroup().get();
-  } else if (configuration::InternalLogs::isInternal(id)) {
-    const auto raw_directory =
-        server_config_->getInternalLogsConfig().getLogGroupByID(id);
-    return raw_directory != nullptr ? raw_directory->log_group.get() : nullptr;
-  } else {
-    return localLogsConfig()->getLogGroupByIDRaw(id);
   }
 }
 
@@ -137,6 +126,15 @@ std::unique_ptr<Configuration> Configuration::fromJson(
     // hopefully fromJson will correctly set err to INVALID_CONFIG
     return nullptr;
   }
+
+  // Try to parse the Zookeeper section, but it is only required on servers
+  std::unique_ptr<ZookeeperConfig> zookeeper_config;
+  auto iter = parsed.find("zookeeper");
+  if (iter != parsed.items().end()) {
+    const folly::dynamic& zookeeperSection = iter->second;
+    zookeeper_config = ZookeeperConfig::fromJson(zookeeperSection);
+  }
+
   std::shared_ptr<LogsConfig> logs_config = nullptr;
   if (alternative_logs_config) {
     logs_config = alternative_logs_config;
@@ -154,7 +152,8 @@ std::unique_ptr<Configuration> Configuration::fromJson(
       }
       // We couldn't not parse the logs/defaults section of the config, we will
       // return the nullptr logsconfig.
-      return std::make_unique<Configuration>(std::move(server_config), nullptr);
+      return std::make_unique<Configuration>(
+          std::move(server_config), nullptr, std::move(zookeeper_config));
     }
     local_logs_config->setInternalLogsConfig(
         server_config->getInternalLogsConfig());
@@ -164,14 +163,16 @@ std::unique_ptr<Configuration> Configuration::fromJson(
       local_logs_config->markAsFullyLoaded();
       logs_config = std::move(local_logs_config);
     } else {
-      return std::make_unique<Configuration>(std::move(server_config), nullptr);
+      return std::make_unique<Configuration>(
+          std::move(server_config), nullptr, std::move(zookeeper_config));
     }
   }
   // Ensure the logs config knows about the namespace delimiter (which is
   // specified in the server config).
   logs_config->setNamespaceDelimiter(server_config->getNamespaceDelimiter());
 
-  return std::make_unique<Configuration>(std::move(server_config), logs_config);
+  return std::make_unique<Configuration>(
+      std::move(server_config), logs_config, std::move(zookeeper_config));
 }
 
 std::unique_ptr<Configuration>
@@ -237,7 +238,8 @@ std::string Configuration::normalizeJson(const char* server_config_contents,
 }
 std::string Configuration::toString() const {
   if (server_config_) {
-    return server_config_->toString(logs_config_.get());
+    return server_config_->toString(
+        logs_config_.get(), zookeeper_config_.get());
   }
   return "";
 }

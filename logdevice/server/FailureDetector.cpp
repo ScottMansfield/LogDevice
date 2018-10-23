@@ -12,14 +12,14 @@
 #include <folly/small_vector.h>
 
 #include "logdevice/common/ClusterState.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/GetClusterStateRequest.h"
-#include "logdevice/server/ServerProcessor.h"
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/Socket.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/stats/ServerHistograms.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/util.h"
+#include "logdevice/server/ServerProcessor.h"
 
 namespace facebook { namespace logdevice {
 
@@ -208,7 +208,7 @@ void FailureDetector::startClusterStateTimer() {
     ld_info("Invalid get-cluster-state");
     buildInitialState();
   } else {
-    cs_timer_.assign(w->getEventBase(), [=] {
+    cs_timer_.assign([=] {
       if (waiting_for_cluster_state_) {
         ld_info("Timed out waiting for cluster state reply.");
         buildInitialState();
@@ -329,7 +329,7 @@ bool FailureDetector::checkSkew(const GOSSIP_Message& msg) {
   if (skew >= std::min(std::chrono::milliseconds(1000), threshold).count()) {
     STAT_INCR(getStats(), gossips_delayed_total);
     RATELIMIT_WARNING(std::chrono::seconds(1),
-                      10,
+                      5,
                       "A delayed gossip received from %s, delay:%lums"
                       ", sender time:%lu, now:%lu",
                       msg.gossip_node_.toString().c_str(),
@@ -352,6 +352,22 @@ bool FailureDetector::checkSkew(const GOSSIP_Message& msg) {
     STAT_INCR(getStats(), gossips_dropped_total);
   }
   return drop_gossip;
+}
+
+bool FailureDetector::isValidInstanceId(std::chrono::milliseconds id,
+                                        node_index_t idx) {
+  const auto now = getCurrentTimeInMillis();
+  if (id > now + settings_->gossip_time_skew_threshold) {
+    RATELIMIT_WARNING(std::chrono::seconds(1),
+                      1,
+                      "Rejecting the instance id:%lu for N%hu as its too far "
+                      "in future, now:%lu",
+                      id.count(),
+                      idx,
+                      now.count());
+    return false;
+  }
+  return true;
 }
 
 void FailureDetector::noteConfigurationChanged() {
@@ -543,6 +559,10 @@ bool FailureDetector::processFlags(const GOSSIP_Message& msg) {
     return true;
   }
 
+  if (!isValidInstanceId(msg.instance_id_, sender_idx)) {
+    return true;
+  }
+
   // marking sender alive
   gossip_list_[sender_idx] = 0;
   gossip_ts_[sender_idx] = msg.instance_id_;
@@ -666,13 +686,16 @@ void FailureDetector::onGossipReceived(const GOSSIP_Message& msg) {
               msg.gossip_ts_[i].count());
       continue;
     } else if (gossip_ts_[i] < msg.gossip_ts_[i]) {
-      // If the incoming Gossip message knows about a newer instance
-      // of Node Ni, then copy everything
-      gossip_list_[i] = msg.gossip_list_[i];
-      gossip_ts_[i] = msg.gossip_ts_[i];
-      failover_list_[i] = has_failover_list ? msg.failover_list_[i]
-                                            : std::chrono::milliseconds::zero();
-      to_update.push_back(i);
+      // If the incoming Gossip message knows about a valid
+      // newer instance of Node Ni, then copy everything
+      if (isValidInstanceId(msg.gossip_ts_[i], i)) {
+        gossip_list_[i] = msg.gossip_list_[i];
+        gossip_ts_[i] = msg.gossip_ts_[i];
+        failover_list_[i] = has_failover_list
+            ? msg.failover_list_[i]
+            : std::chrono::milliseconds::zero();
+        to_update.push_back(i);
+      }
       continue;
     }
 
@@ -717,7 +740,7 @@ void FailureDetector::startSuspectTimer() {
   gossip_list_[my_idx] = 0;
   updateNodeState(my_idx, false, true, false);
 
-  suspect_timer_.assign(w->getEventBase(), [=] {
+  suspect_timer_.assign([=] {
     ld_info("Suspect timeout expired");
     updateNodeState(my_idx, false, true, false);
   });

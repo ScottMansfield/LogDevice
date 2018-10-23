@@ -7,24 +7,23 @@
  */
 #include "logdevice/common/util.h"
 
-#include <errno.h>
-#include <limits.h>
-#include <pwd.h>
-#include <signal.h>
-#include <sys/syscall.h>
-#include <sys/prctl.h>
-
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <errno.h>
+#include <limits.h>
+#include <pwd.h>
+#include <signal.h>
 
 #include <folly/Format.h>
 #include <folly/Singleton.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 
+#include "logdevice/common/MetaDataLog.h"
 #include "logdevice/common/commandline_util_chrono.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/common/MetaDataLog.h"
 
 #pragma GCC diagnostic ignored "-Wchar-subscripts"
 
@@ -490,18 +489,6 @@ int get_io_priority_of_this_thread(std::pair<int, int>* out_prio) {
     *out_prio = std::make_pair(rv >> 13, rv & ((1 << 13) - 1));
   }
   return 0;
-}
-
-int64_t usec_since(const std::chrono::steady_clock::time_point& start) {
-  return to_usec(std::chrono::steady_clock::now() - start).count();
-}
-
-int64_t msec_since(const std::chrono::steady_clock::time_point& start) {
-  return to_msec(std::chrono::steady_clock::now() - start).count();
-}
-
-int64_t sec_since(const std::chrono::steady_clock::time_point& start) {
-  return to_sec(std::chrono::steady_clock::now() - start).count();
 }
 
 std::string lowerCase(std::string s) {

@@ -5,24 +5,23 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/common/EpochMetaData.h"
 
 #include <cstdio>
 #include <cstring>
 
 #include <folly/Memory.h>
+#include <gtest/gtest.h>
 
-#include "logdevice/common/MetaDataLog.h"
-#include "logdevice/common/EpochMetaData.h"
 #include "logdevice/common/EpochMetaDataMap.h"
 #include "logdevice/common/EpochMetaDataUpdater.h"
 #include "logdevice/common/EpochStoreEpochMetaDataFormat.h"
+#include "logdevice/common/MetaDataLog.h"
 #include "logdevice/common/ZookeeperEpochStore.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/test/TestNodeSetSelector.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/Record.h"
-
-#include "logdevice/common/test/TestNodeSetSelector.h"
 
 namespace facebook { namespace logdevice {
 
@@ -408,13 +407,13 @@ TEST_F(EpochMetaDataTest, ZookeeperRecordZnodeBuffer) {
   std::shared_ptr<Configuration> cfg = parseConfig();
 
   const auto zk_record = genValidEpochMetaData();
-  const NodeID nid(1234, 2345);
+  const folly::Optional<NodeID> nid(NodeID(1234, 2345));
 
   char zbuf[ZookeeperEpochStore::ZNODE_VALUE_WRITE_LEN_MAX];
   int rv = EpochStoreEpochMetaDataFormat::toLinearBuffer(
-      zk_record, zbuf, sizeof(zbuf) / sizeof(zbuf[0]), &nid);
+      zk_record, zbuf, sizeof(zbuf) / sizeof(zbuf[0]), nid);
   int expected_size =
-      EpochStoreEpochMetaDataFormat::sizeInLinearBuffer(zk_record, &nid);
+      EpochStoreEpochMetaDataFormat::sizeInLinearBuffer(zk_record, nid);
   EXPECT_EQ(expected_size, rv);
 
   EpochMetaData record_from_buffer;
@@ -448,10 +447,10 @@ TEST_F(EpochMetaDataTest, ZookeeperRecordZnodeBuffer) {
 
   std::string small;
   small.resize(
-      EpochStoreEpochMetaDataFormat::sizeInLinearBuffer(zk_record, &nid) - 1);
+      EpochStoreEpochMetaDataFormat::sizeInLinearBuffer(zk_record, nid) - 1);
 
   rv = EpochStoreEpochMetaDataFormat::toLinearBuffer(
-      zk_record, &small[0], small.size(), &nid);
+      zk_record, &small[0], small.size(), nid);
   EXPECT_EQ(-1, rv);
   EXPECT_EQ(E::NOBUFS, err);
 
@@ -498,8 +497,7 @@ TEST_F(EpochMetaDataTest, EpochMetaDataUpdaterTest) {
   ASSERT_NE(nullptr, cfg.get());
   ASSERT_NE(nullptr, cfg.get()->serverConfig());
   ASSERT_NE(nullptr, cfg.get()->logsConfig());
-  LogsConfig::LogGroupNode* logcfg = const_cast<LogsConfig::LogGroupNode*>(
-      cfg->getLogGroupByIDRaw(logid_t(2)));
+  auto logcfg = cfg->getLogGroupByIDShared(logid_t(2));
   LogsConfig::LogAttributes& attrs =
       const_cast<LogsConfig::LogAttributes&>(logcfg->attrs());
   auto selector = std::make_shared<TestNodeSetSelector>();
@@ -589,8 +587,7 @@ TEST_F(EpochMetaDataTest, EpochMetaDataUpdateToNextEpochTest) {
   ASSERT_NE(nullptr, cfg.get());
   ASSERT_NE(nullptr, cfg.get()->serverConfig());
   ASSERT_NE(nullptr, cfg.get()->logsConfig());
-  LogsConfig::LogGroupNode* logcfg = const_cast<LogsConfig::LogGroupNode*>(
-      cfg->getLogGroupByIDRaw(logid_t(2)));
+  auto logcfg = cfg->getLogGroupByIDShared(logid_t(2));
   LogsConfig::LogAttributes& attrs =
       const_cast<LogsConfig::LogAttributes&>(logcfg->attrs());
   EpochMetaDataUpdateToNextEpoch updater(cfg);

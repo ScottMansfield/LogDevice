@@ -5,10 +5,10 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <thread>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
-#include <cstdlib>
+#include <thread>
 #include <unordered_map>
 
 #include <folly/AtomicHashMap.h>
@@ -16,14 +16,12 @@
 #include <folly/Memory.h>
 #include <folly/SharedMutex.h>
 #include <folly/ThreadLocal.h>
-
+#include <gflags/gflags.h>
 #include <google/dense_hash_map>
 
-#include <gflags/gflags.h>
-
-#include "logdevice/include/Err.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/UpdateableSharedPtr.h"
+#include "logdevice/common/types_internal.h"
+#include "logdevice/include/Err.h"
 
 using namespace facebook::logdevice;
 
@@ -517,9 +515,12 @@ BENCH(ReadsIn10Threads);
 
 } // namespace
 
+#ifndef BENCHMARK_BUNDLE
+
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::runBenchmarks();
 
   return 0;
 }
+#endif

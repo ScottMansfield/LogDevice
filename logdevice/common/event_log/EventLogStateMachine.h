@@ -8,8 +8,8 @@
 #pragma once
 
 #include "logdevice/common/event_log/EventLogRebuildingSet.h"
-#include "logdevice/common/event_log/EventLogRebuildingSet_generated.h"
 #include "logdevice/common/event_log/EventLogRebuildingSetCodec.h"
+#include "logdevice/common/event_log/EventLogRebuildingSet_generated.h"
 #include "logdevice/common/event_log/EventLogRecord.h"
 #include "logdevice/common/replicated_state_machine/ReplicatedStateMachine.h"
 #include "logdevice/common/replicated_state_machine/TrimRSMRetryHandler.h"
@@ -202,7 +202,7 @@ class EventLogStateMachine
 
   // Snapshot creation completion callback. On success, also issue a request to
   // trim the RSM if possible.
-  void onSnapshotCreated(Status st) override;
+  void onSnapshotCreated(Status st, size_t snapshotSize) override;
 
   UpdateableSettings<Settings> settings_;
 
@@ -210,7 +210,7 @@ class EventLogStateMachine
   bool write_delta_header_{true};
 
   // Used to publish rebuilding set changes after event_log_grace_period.
-  LibeventTimer gracePeriodTimer_;
+  Timer gracePeriodTimer_;
 
   // Last ShardAuthoritativeStatusMap that was broadcast.
   ShardAuthoritativeStatusMap last_broadcast_map_;

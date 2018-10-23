@@ -5,24 +5,27 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <pthread.h>
 #include <thread>
 
+#include <folly/json.h>
 #include <gtest/gtest.h>
 
 #include "logdevice/common/AppendRequest.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/HashBasedSequencerLocator.h"
 #include "logdevice/common/NoopTraceLogger.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Semaphore.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/test/TestUtil.h"
+#include "logdevice/lib/ClientBuiltinPluginProvider.h"
 #include "logdevice/lib/ClientImpl.h"
 #include "logdevice/lib/ClientPluginPack.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
@@ -49,7 +52,8 @@ TEST_F(AppendIntegrationTest, AppendRequestEcho) {
                         nullptr, /*stats*/
                         std::make_unique<HashBasedSequencerLocator>(
                             cluster->getConfig()->updateableServerConfig()),
-                        make_test_plugin_pack());
+                        make_test_plugin_pack(),
+                        make_test_plugin_registry());
 
   char data[128]; // send the contents of this array as payload
 
@@ -422,6 +426,8 @@ TEST_F(AppendIntegrationTest, NoSequencer) {
   client_config->updateableServerConfig()->update(
       cluster_config->serverConfig());
   client_config->updateableLogsConfig()->update(logs_config);
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -429,7 +435,7 @@ TEST_F(AppendIntegrationTest, NoSequencer) {
       "",
       this->testTimeout(),
       std::unique_ptr<ClientSettings>(),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   // make an appendSync() call for the new log. Expect "no sequencer for log"
@@ -468,6 +474,8 @@ TEST_F(AppendIntegrationTest, LogIdNotInServerConfig) {
   client_config->updateableServerConfig()->update(
       cluster_config->serverConfig());
   client_config->updateableLogsConfig()->update(logs_config);
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -475,7 +483,7 @@ TEST_F(AppendIntegrationTest, LogIdNotInServerConfig) {
       "",
       this->testTimeout(),
       std::unique_ptr<ClientSettings>(),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   // make an appendSync() call for the new log.
@@ -558,7 +566,8 @@ TEST_F(AppendIntegrationTest, ThreadMapping) {
                         nullptr, /*Stats*/
                         std::make_unique<HashBasedSequencerLocator>(
                             cluster->getConfig()->updateableServerConfig()),
-                        make_test_plugin_pack());
+                        make_test_plugin_pack(),
+                        make_test_plugin_registry());
 
   const std::string payload = "foo";
   auto append = [&](logid_t log_id) -> std::thread::id {
@@ -796,6 +805,86 @@ TEST_F(AppendIntegrationTest, CheckNodeHealthTest) {
   std::map<std::string, int64_t> stats = cluster->getNode(0).stats();
   // No more than 1 store should have been sent
   EXPECT_EQ(1, stats["store_received"]);
+}
+
+// test write lsn after local trim point
+TEST_F(AppendIntegrationTest, WriteLsnAfterTrimPoint) {
+  auto cluster = IntegrationTestUtils::ClusterFactory().create(1);
+  auto client = cluster->createClient();
+
+  std::string data(128, 'x');
+
+  auto stats = cluster->getNode(0).stats();
+  auto skipped_records = stats["skipped_record_lsn_before_trim_point"];
+
+  // it is highly unlikely that this doesn't succeed in 10 tries.
+  auto tries = 0;
+  auto max_tries = 10;
+  int rv;
+  std::string cmd, response;
+  lsn_t new_lsn, old_lsn;
+  for (tries = 0; tries < max_tries; tries++) {
+    // write two records
+    old_lsn = client->appendSync(logid_t(2), data);
+    ASSERT_NE(LSN_INVALID, old_lsn);
+    old_lsn = client->appendSync(logid_t(2), data);
+    ASSERT_NE(LSN_INVALID, old_lsn);
+
+    cmd = folly::sformat(
+        "info record {} {} {} --json  --table", 2, old_lsn, old_lsn);
+    response = cluster->getNode(0).sendCommand(cmd, false);
+    // even with --json, there are some trailing chars that need to be clipped
+    EXPECT_GT(response.size(), 7);
+    auto json = folly::parseJson(response.substr(0, response.size() - 7));
+    // sanity check (this is a dict with rows and headers keys)
+    EXPECT_EQ(2, json.size());
+
+    stats = cluster->getNode(0).stats();
+    skipped_records = stats["skipped_record_lsn_before_trim_point"];
+
+    // trim way past this lsn
+    rv = client->settings().set("disable-trim-past-tail-check", "true");
+    EXPECT_EQ(0, rv);
+    // 1024 because, why not!
+    rv = client->trimSync(logid_t(2), old_lsn + 1024);
+    ASSERT_EQ(0, rv);
+
+    // write another record. we expect the lsn to be less than the trim point
+    new_lsn = client->appendSync(logid_t(2), data);
+    ASSERT_NE(LSN_INVALID, new_lsn);
+    // if epoch incremented, we cannot proceed with the test. retry.
+    if (lsn_to_epoch(new_lsn) == lsn_to_epoch(old_lsn)) {
+      ASSERT_GT(old_lsn + 1024, new_lsn);
+      break;
+    }
+  }
+
+  if (tries == max_tries) {
+    // this is highly unlikely but this is NOT a test failure
+    ld_info("Test did not exercise WriteLsnAfterTrimPoint");
+    return;
+  }
+
+  // the write for the record with new_lsn should succeed but the record
+  // shouldn't actually get written to RocksDB. verify with stats
+  stats = cluster->getNode(0).stats();
+  ASSERT_GT(stats["skipped_record_lsn_before_trim_point"], skipped_records);
+
+  // double check with admin command that the record wasn't written to RocksDB
+  cmd = folly::sformat("info record {} {} {}", 2, new_lsn, new_lsn);
+  response = cluster->getNode(0).sendCommand(cmd, false);
+  EXPECT_EQ("END\r\n", response);
+
+  // we shouldn't be able to read anything back (everything is trimmed)
+  auto reader = client->createReader(1);
+  reader->setTimeout(std::chrono::seconds(5));
+  rv = reader->startReading(logid_t(2), old_lsn);
+  ASSERT_EQ(0, rv);
+
+  std::vector<std::unique_ptr<DataRecord>> records;
+  GapRecord gap;
+  auto nread = reader->read(2, &records, &gap);
+  ASSERT_EQ(-1, nread);
 }
 
 // Returns the number of successful writes

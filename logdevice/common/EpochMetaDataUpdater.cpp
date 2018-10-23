@@ -6,10 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include "EpochMetaDataUpdater.h"
+
 #include "logdevice/common/MetaDataTracer.h"
 #include "logdevice/common/NodeSetSelectorFactory.h"
 #include "logdevice/common/debug.h"
-
 #include "logdevice/lib/ClientProcessor.h"
 
 namespace facebook { namespace logdevice {
@@ -39,7 +39,8 @@ EpochMetaData::UpdateResult EpochMetaDataUpdaterBase::generateNewMetaData(
     bool provision_if_empty,
     bool update_if_exists,
     bool force_update) {
-  const LogsConfig::LogGroupNode* logcfg = config->getLogGroupByIDRaw(log_id);
+  const std::shared_ptr<LogsConfig::LogGroupNode> logcfg =
+      config->getLogGroupByIDShared(log_id);
   if (!logcfg) {
     err = E::NOTFOUND;
     return EpochMetaData::UpdateResult::FAILED;

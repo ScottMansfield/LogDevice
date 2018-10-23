@@ -26,11 +26,12 @@
 #include "logdevice/common/RunState.h"
 #include "logdevice/common/ThreadID.h"
 #include "logdevice/common/TimeoutMap.h"
-#include "logdevice/common/types_internal.h"
-#include "logdevice/common/util.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/WorkerType.h"
 #include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
+#include "logdevice/common/types_internal.h"
+#include "logdevice/common/util.h"
 #include "logdevice/include/ConfigSubscriptionHandle.h"
 // Think twice before adding new includes here!  This file is included in many
 // translation units and increasing its transitive dependency footprint will
@@ -121,10 +122,11 @@ class MetaDataLogReader;
 class Mutator;
 class Processor;
 class RebuildingCoordinatorInterface;
+class Request;
 class SSLFetcher;
 class Sender;
-class ServerConfig;
 class SequencerBackgroundActivator;
+class ServerConfig;
 class ShardAuthoritativeStatusManager;
 class SocketCallback;
 class StatsHolder;
@@ -139,6 +141,7 @@ struct AppenderMap;
 struct CheckNodeHealthRequestSet;
 struct CheckSealRequestMap;
 struct ClusterStateSubscriptionList;
+struct DataSizeRequestMap;
 struct ExponentialBackoffTimerNode;
 struct FindKeyRequestMap;
 struct FireAndForgetRequestMap;
@@ -148,7 +151,6 @@ struct GetHeadAttributesRequestMap;
 struct GetLogInfoRequestMaps;
 struct GetTrimPointRequestMap;
 struct IsLogEmptyRequestMap;
-struct DataSizeRequestMap;
 struct LogIDUniqueQueue;
 struct LogRebuildingMap;
 struct LogRecoveryRequestMap;
@@ -158,6 +160,19 @@ struct LogsConfigManagerRequestMap;
 struct MUTATED_Header;
 struct TrimRequestMap;
 struct WriteMetaDataRecordMap;
+
+struct CheckImpactRequestMap {
+  std::unordered_map<request_id_t,
+                     // We are not using the concrete type here to avoid the
+                     // dependency on this type.
+                     std::unique_ptr<Request>,
+                     request_id_t::Hash>
+      map;
+};
+
+namespace configuration {
+class ZookeeperConfig;
+}
 
 template <typename Duration>
 class ChronoExponentialBackoffAdaptiveVariable;
@@ -220,6 +235,12 @@ class Worker : public EventLoop {
    *         auto updated
    */
   std::shared_ptr<LogsConfig> getLogsConfig() const;
+
+  /**
+   * @return zookeeper configuration object cached on this Worker and
+   *         auto updated
+   */
+  std::shared_ptr<configuration::ZookeeperConfig> getZookeeperConfig() const;
 
   /**
    * Gets the UpdateableConfig object - used to force a reload of the config
@@ -365,6 +386,9 @@ class Worker : public EventLoop {
 
   // a map for all currently running LogsConfigApiRequest
   LogsConfigApiRequestMap& runningLogsConfigApiRequests() const;
+
+  // a map for all currently running CheckImpactRequests
+  CheckImpactRequestMap& runningCheckImpactRequests() const;
 
   // Internal LogsConfigManager requests map
   LogsConfigManagerRequestMap& runningLogsConfigManagerRequests() const;
@@ -679,6 +703,8 @@ class Worker : public EventLoop {
 
   void activateIsolationTimer();
 
+  void activateClusterStatePolling();
+
   void deactivateIsolationTimer();
 
  protected:
@@ -732,7 +758,7 @@ class Worker : public EventLoop {
 
   // timer that checks requestsPending() == 0 and !sender().isConnected() and
   // calls Processor's noteWorkerQuiescent() once both are true.
-  std::unique_ptr<LibeventTimer> requests_pending_timer_;
+  std::unique_ptr<Timer> requests_pending_timer_;
 
   // Force abort pending requests. This is a derived timer based on
   // requests_pending_timer to force abort the requests.
@@ -753,14 +779,14 @@ class Worker : public EventLoop {
 
   // timer that checks stuck requests and update counter if there are some
   // stuck requests
-  LibeventTimer requests_stuck_timer_;
+  std::unique_ptr<Timer> requests_stuck_timer_;
 
   // true iff we've called flushOutputAndClose() on sender().
   bool waiting_for_sockets_to_close_{false};
 
   // used to dispose concluded MetaDataLogReader objects and their associated
   // ClientReadStream objects
-  std::unique_ptr<LibeventTimer> dispose_metareader_timer_;
+  std::unique_ptr<Timer> dispose_metareader_timer_;
 
   // finished MetaDataLogReader objects to be disposed
   std::queue<std::unique_ptr<MetaDataLogReader>> finished_meta_readers_;
@@ -776,11 +802,12 @@ class Worker : public EventLoop {
 
   // Timer for the worker to periodically report its load, and associated
   // state required to calculate recent load. See reportLoad().
-  LibeventTimer load_timer_;
+  std::unique_ptr<Timer> load_timer_;
   int64_t last_load_ = -1;
   std::chrono::steady_clock::time_point last_load_time_;
+  std::unique_ptr<Timer> isolation_timer_;
 
-  LibeventTimer isolation_timer_;
+  std::unique_ptr<Timer> cluster_state_polling_;
 
   // Size limit for commonTimeouts_ (NB: libevent has a default upper bound
   // of MAX_COMMON_TIMEOUTS = 256)

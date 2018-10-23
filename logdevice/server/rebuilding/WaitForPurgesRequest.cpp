@@ -8,9 +8,9 @@
 
 #include "logdevice/server/rebuilding/WaitForPurgesRequest.h"
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/MetaDataLog.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/RELEASE_Message.h"
 #include "logdevice/server/ServerProcessor.h"
@@ -37,17 +37,16 @@ WaitForPurgesRequest::WaitForPurgesRequest(
 
 void WaitForPurgesRequest::executionBody() {
   retryTimer_ = std::make_unique<ExponentialBackoffTimer>(
-      Worker::onThisThread()->getEventBase(),
-      [this]() { tryAgain(); },
-      rebuildingSettings_->wait_purges_backoff_time);
+
+      [this]() { tryAgain(); }, rebuildingSettings_->wait_purges_backoff_time);
 
   tryAgain();
   // `this` may be destroyed.
 }
 
 void WaitForPurgesRequest::tryAgain() {
-  const auto* logcfg =
-      Worker::getConfig()->getLogGroupByIDRaw(MetaDataLog::dataLogID(logid_));
+  const auto logcfg = Worker::getConfig()->getLogGroupByIDShared(
+      MetaDataLog::dataLogID(logid_));
   if (!logcfg) {
     // The log was removed from the config.
     onComplete(E::NOTFOUND);

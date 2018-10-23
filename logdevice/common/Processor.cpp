@@ -14,18 +14,19 @@
 
 #include <folly/Conv.h>
 #include <folly/Hash.h>
-#include <folly/Memory.h>
 #include <folly/MPMCQueue.h>
+#include <folly/Memory.h>
 #include <folly/synchronization/CallOnce.h>
 
 #include "logdevice/common/AllSequencers.h"
 #include "logdevice/common/AppendProbeController.h"
+#include "logdevice/common/ClientAPIHitsTracer.h"
 #include "logdevice/common/ClientIdxAllocator.h"
 #include "logdevice/common/ClusterState.h"
 #include "logdevice/common/EventLoopHandle.h"
+#include "logdevice/common/LegacyPluginPack.h"
 #include "logdevice/common/MetaDataLogWriter.h"
 #include "logdevice/common/PermissionChecker.h"
-#include "logdevice/common/PluginPack.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/SecurityInformation.h"
 #include "logdevice/common/SequencerBatching.h"
@@ -33,16 +34,18 @@
 #include "logdevice/common/Thread.h"
 #include "logdevice/common/TraceLogger.h"
 #include "logdevice/common/TrafficShaper.h"
-#include "logdevice/common/types_internal.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/UpdateableSecurityInfo.h"
 #include "logdevice/common/WatchDogThread.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/WorkerLoadBalancing.h"
 #include "logdevice/common/ZeroCopiedRecordDisposal.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/event_log/EventLogRebuildingSet.h"
+#include "logdevice/common/plugin/CommonBuiltinPlugins.h"
+#include "logdevice/common/plugin/StaticPluginLoader.h"
 #include "logdevice/common/stats/ServerHistograms.h"
 #include "logdevice/common/stats/Stats.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 
 namespace {
@@ -123,7 +126,8 @@ Processor::Processor(std::shared_ptr<UpdateableConfig> updateable_config,
                      UpdateableSettings<Settings> settings,
                      StatsHolder* stats,
                      std::unique_ptr<SequencerLocator> sequencer_locator,
-                     std::shared_ptr<PluginPack> plugin,
+                     std::shared_ptr<LegacyPluginPack> plugin,
+                     std::shared_ptr<PluginRegistry> plugin_registry,
                      std::string credentials,
                      std::string csid,
                      std::string name)
@@ -132,12 +136,14 @@ Processor::Processor(std::shared_ptr<UpdateableConfig> updateable_config,
       config_(std::move(updateable_config)),
       settings_(settings),
       plugin_(std::move(plugin)),
+      plugin_registry_(std::move(plugin_registry)),
       stats_(stats),
       impl_(new ProcessorImpl(this, settings)),
       sequencer_locator_(std::move(sequencer_locator)),
       conn_budget_incoming_(settings_->max_incoming_connections),
       conn_budget_backlog_(settings_->connection_backlog),
       conn_budget_external_(settings_->max_external_connections),
+      api_hits_tracer_(std::make_unique<ClientAPIHitsTracer>(trace_logger)),
       HELLOCredentials_(settings_->server ? Principal::CLUSTER_NODE
                                           : std::move(credentials)),
       csid_(std::move(csid)),
@@ -250,6 +256,23 @@ EventLoopHandle& Processor::findWorker(WorkerType type, int worker_idx) {
   return *workers[worker_idx];
 }
 
+namespace {
+class TestBuiltinPlugin : public virtual Plugin,
+                          public virtual LegacyPluginPack {
+  Type type() const override {
+    return Type::LEGACY_CLIENT_PLUGIN;
+  }
+
+  std::string identifier() const override {
+    return PluginRegistry::kBuiltin().str() + " test";
+  }
+
+  std::string displayName() const override {
+    return "Test plugin";
+  }
+};
+} // namespace
+
 // Testing Constructor
 Processor::Processor(UpdateableSettings<Settings> settings,
                      bool fake_storage_node,
@@ -257,7 +280,10 @@ Processor::Processor(UpdateableSettings<Settings> settings,
                      StatsHolder* stats)
     : fake_storage_node_(fake_storage_node),
       settings_(settings),
-      plugin_(std::make_shared<PluginPack>()),
+      plugin_(std::make_shared<LegacyPluginPack>()),
+      plugin_registry_(std::make_shared<PluginRegistry>(
+          createAugmentedCommonBuiltinPluginVector<StaticPluginLoader,
+                                                   TestBuiltinPlugin>())),
       stats_(stats),
       impl_(new ProcessorImpl(this, settings)),
       conn_budget_incoming_(settings_.get()->max_incoming_connections),

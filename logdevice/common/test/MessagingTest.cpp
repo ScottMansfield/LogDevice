@@ -8,20 +8,16 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
-
 #include <pthread.h>
-#include <unistd.h>
 #include <stdio.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <unistd.h>
 
 #include <folly/Memory.h>
-
 #include <gtest/gtest.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "logdevice/common/Address.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/ConnectThrottle.h"
 #include "logdevice/common/EventLoopHandle.h"
 #include "logdevice/common/NoopTraceLogger.h"
@@ -29,9 +25,9 @@
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/SocketCallback.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/HELLO_Message.h"
-
 #include "logdevice/common/test/TestUtil.h"
 
 namespace facebook { namespace logdevice {
@@ -504,7 +500,7 @@ TEST(MessagingTest, SendFromCallback) {
   Configuration::NodesConfig nodes({{0, std::move(node)}});
   auto config =
       std::make_shared<UpdateableConfig>(std::make_shared<Configuration>(
-          ServerConfig::fromData(
+          ServerConfig::fromDataTest(
               __FILE__, nodes, Configuration::MetaDataLogsConfig()),
           nullptr));
 

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <chrono>
+
 #include <folly/small_vector.h>
 
 #include "logdevice/common/BWAvailableCallback.h"
@@ -19,7 +20,6 @@
 #include "logdevice/common/NodeAvailabilityChecker.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/Random.h"
-#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/common/RebuildingTracer.h"
 #include "logdevice/common/RebuildingTypes.h"
 #include "logdevice/common/Sender.h"
@@ -27,6 +27,7 @@
 #include "logdevice/common/UpdateableSharedPtr.h"
 #include "logdevice/common/WeakRefHolder.h"
 #include "logdevice/common/protocol/STORED_Message.h"
+#include "logdevice/common/settings/RebuildingSettings.h"
 #include "logdevice/include/types.h"
 #include "logdevice/server/read_path/LocalLogStoreReader.h"
 #include "logdevice/server/storage_tasks/WriteStorageTask.h"
@@ -328,7 +329,7 @@ class RecordRebuildingBase : public RecordRebuildingInterface {
 
   ExponentialBackoffTimer retryTimer_;
   ExponentialBackoffTimer storeTimer_;
-  std::unique_ptr<LibeventTimer> deferredCompleteTimer_;
+  std::unique_ptr<Timer> deferredCompleteTimer_;
   bool amendSelfStorageTaskInFlight_ = false;
 
   // On failure returns -1 and sets err to:

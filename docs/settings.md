@@ -4,6 +4,12 @@ title: Configuration settings
 sidebar_label: Settings
 ---
 
+## Admin API/server
+|   Name    |   Description   |  Default  |   Notes   |
+|-----------|-----------------|:---------:|-----------|
+| safety-check-max-logs-in-flight | The number of concurrent logs that we runs checks against during execution of the CheckImpact operation either internally during a maintenance or through the Admin API's checkImpact() call | 1000 | server&nbsp;only |
+| safety-check-timeout | The total time the safety check should take to run. This is the time that the CheckImpact operation need to take to scan all logs along with all the historical metadata to ensure than a maintenance is safe | 10min | server&nbsp;only |
+
 ## Batching and compression
 |   Name    |   Description   |  Default  |   Notes   |
 |-----------|-----------------|:---------:|-----------|
@@ -71,7 +77,7 @@ sidebar_label: Settings
 | gossip-logging-duration | How long to keep logging FailureDetector/Gossip related activity after server comes up. | 0s | server&nbsp;only |
 | gossip-mode | How to select a node to send a gossip message to. One of: 'round-robin', 'random' (default) | random | requires&nbsp;restart, server&nbsp;only |
 | gossip-threshold | Specifies after how many gossip intervals of inactivity a node is marked as dead. Lower values reduce detection time, but make false positives more likely. | 30 | server&nbsp;only |
-| gossip-time-skew | How much delay is acceptable in receiving a gossip message. | max | server&nbsp;only |
+| gossip-time-skew | How much delay is acceptable in receiving a gossip message. | 10s | server&nbsp;only |
 | ignore-isolation | Ignore isolation detection. If set, a sequencer will accept append operations even if a majority of nodes appear to be dead. | false | server&nbsp;only |
 | min-gossips-for-stable-state | After receiving how many gossips, should the FailureDetector consider itself stable and start doing state transitions of cluster nodes based on incoming gossips. | 3 | server&nbsp;only |
 | suspect-duration | How long to keep a node in an intermediate state before marking it as available. Larger values make the cluster less prone to node flakiness, but extend the time needed for sequencer nodes to start participating. | 10s | server&nbsp;only |
@@ -119,7 +125,7 @@ sidebar_label: Settings
 ## Monitoring
 |   Name    |   Description   |  Default  |   Notes   |
 |-----------|-----------------|:---------:|-----------|
-| client-readers-flow-tracer-period | Period for logging in logdevice\_readers\_flow scuba table.Set it to 0 to disable feature. | 0s | client&nbsp;only |
+| client-readers-flow-tracer-period | Period for logging in logdevice\_readers\_flow scuba table and for triggering certain sampling actions for monitoring. Set it to 0 to disable feature. | 0s | client&nbsp;only |
 | disable-trace-logger | If disabled, NoopTraceLogger will be used, otherwise FBTraceLogger is used | false | requires&nbsp;restart |
 | message-tracing-log-level | For messages that pass the message tracing filters, emit a log line at this level. One of: critical, error, warning, notify, info, debug, spew | info |  |
 | message-tracing-peers | Emit a log line for each sent/received message to/from the specified address(es). Separate different addresses with a comma, prefix unix socket paths with 'unix://'. An empty unix path will match all unix paths |  |  |
@@ -152,8 +158,8 @@ sidebar_label: Settings
 | connection-backlog | (server-only setting) Maximum number of incoming connections that have been accepted by listener (have an open FD) but have not been processed by workers (made logdevice protocol handshake). | 2000 | server&nbsp;only |
 | connection-retries | the number of TCP connection retries before giving up | 4 |  |
 | handshake-timeout | LogDevice protocol handshake timeout | 1s |  |
-| include-destination-on-handshake | Include the destination node ID in the LogDevice protocol handshake. If the actual node ID of the connection target does not match the intended destination ID, the connection is terminated. | false |  |
-| max-protocol | maximum version of LogDevice protocol that the server/client will accept | 83 |  |
+| include-destination-on-handshake | Include the destination node ID in the LogDevice protocol handshake. If the actual node ID of the connection target does not match the intended destination ID, the connection is terminated. | true |  |
+| max-protocol | maximum version of LogDevice protocol that the server/client will accept | 85 |  |
 | nagle | enable Nagle's algorithm on TCP sockets. Changing this setting on-the-fly will not apply it to existing sockets, only to newly created ones | false |  |
 | outbuf-kb | max output buffer size (userspace extension of socket sendbuf) in KB. Changing this setting on-the-fly will not apply it to existing sockets, only to newly created ones | 32768 |  |
 | outbytes-mb | per-thread limit on bytes pending in output evbuffers (in MB) | 512 |  |
@@ -164,7 +170,7 @@ sidebar_label: Settings
 | tcp-keep-alive-probes | TCP keepalive probes. How many unacknowledged probes before the connection is considered broken. If negative the OS default will be used. | -1 |  |
 | tcp-keep-alive-time | TCP keepalive time. This is the time, in seconds, before the first probe will be sent. If negative the OS default will be used. | -1 |  |
 | tcp-user-timeout | The time in miliseconds that transmitted data may remain unacknowledgedbefore TCP will close the connection. 0 for system default. -1 to disable. default is 5min = 300000 | 300000 |  |
-| use-tcp-keep-alive | Enable TCP keepalive for all connections | false |  |
+| use-tcp-keep-alive | Enable TCP keepalive for all connections | true |  |
 
 ## Performance
 |   Name    |   Description   |  Default  |   Notes   |
@@ -179,7 +185,7 @@ sidebar_label: Settings
 |-----------|-----------------|:---------:|-----------|
 | client-epoch-metadata-cache-size | maximum number of entries in the client-side epoch metadata cache. Set it to 0 to disable the epoch metadata cache. | 50000 | requires&nbsp;restart, client&nbsp;only |
 | client-initial-redelivery-delay | Initial delay to use when reader application rejects a record or gap | 1s |  |
-| client-is-log-empty-grace-period | After receiving responses to an isLogEmpty() request from an f-majority of nodes, wait up to this long for more nodes to chime in if there is not yet consensus. | 100ms | **experimental**, client&nbsp;only |
+| client-is-log-empty-grace-period | After receiving responses to an isLogEmpty() request from an f-majority of nodes, wait up to this long for more nodes to chime in if there is not yet consensus. | 5s | **experimental**, client&nbsp;only |
 | client-max-redelivery-delay | Maximum delay to use when reader application rejects a record or gap | 30s |  |
 | client-read-buffer-size | number of records to buffer per read stream in the client object while reading. If this setting is changed on-the-fly, the change will only apply to new reader instances | 512 |  |
 | client-read-flow-control-threshold | threshold (relative to buffer size) at which the client broadcasts window update messages (less means more often) | 0.7 |  |
@@ -188,6 +194,7 @@ sidebar_label: Settings
 | grace-counter-limit | Maximum number of consecutive grace periods a storage node may fail to send a record or gap (if in all read all mode) before it is considered disgraced and client read streams no longer wait for it. If all nodes are disgraced or in GAP state, a gap record is issued. May be 0. Set to -1 to disable grace counters and use simpler logic: no disgraced nodes, issue gap record as soon as grace period expires. | 2 |  |
 | log-state-recovery-interval | interval between consecutive attempts by a storage node to obtain the attributes of a log residing on that storage node Such 'log state recovery' is performed independently for each log upon the first request to start delivery of records of that log. The attributes to be recovered include the LSN of the last cumulatively released record in the log, which may have to be requested from the log's sequencer over the network. | 500ms | requires&nbsp;restart, server&nbsp;only |
 | max-record-bytes-read-at-once | amount of RECORD data to read from local log store at once | 1048576 | server&nbsp;only |
+| metadata-log-gap-grace-period | When non-zero, replaces gap-grace-period for metadata logs. | 0ms |  |
 | output-max-records-kb | amount of RECORD data to push to the client at once | 1024 |  |
 | reader-reconnect-delay | When a reader client loses a connection to a storage node, delay after which it tries reconnecting. | 10ms..30s | client&nbsp;only |
 | reader-retry-window-delay | When a reader client fails to send a WINDOW message, delay after which it retries sending it. | 10ms..30s | client&nbsp;only |
@@ -363,7 +370,6 @@ sidebar_label: Settings
 | ssl-cert-refresh-interval | TTL for an SSL certificate that we have loaded from disk. | 300s | requires&nbsp;restart |
 | ssl-key-path | Path to LogDevice SSL key. |  | requires&nbsp;restart |
 | ssl-load-client-cert | Set to include client certificate for mutual ssl authenticaiton | false |  |
-| ssl-server-hostname-prefix-regex | A regex that should match the names of hosts that may be included in a LogDevice cluster. Note: this is not a raw string, all '\\'' characters should be written as '\\\\'. | logdevice[rfh]? | server&nbsp;only |
 
 ## Sequencer State
 |   Name    |   Description   |  Default  |   Notes   |
@@ -375,6 +381,8 @@ sidebar_label: Settings
 | read-historical-metadata-timeout | maximum time interval for a sequencer to get historical epoch metadata through reading the metadata log before retrying. | 10s | server&nbsp;only |
 | seq-state-backoff-time | how long to wait before resending a 'get sequencer state' request after a timeout. | 1s..10s |  |
 | seq-state-reply-timeout | how long to wait for a reply to a 'get sequencer state' request before retrying (usually to a different node) | 2s |  |
+| update-metadata-map-interval | Sequencer has a timer for periodically reading metadata logs and refreshing the in memory metadata_map_. This setting specifies
+the interval for this timer | 1h |  |
 
 ## Sequencer boycotting
 |   Name    |   Description   |  Default  |   Notes   |
@@ -468,7 +476,11 @@ sidebar_label: Settings
 ## Uncategorized
 |   Name    |   Description   |  Default  |   Notes   |
 |-----------|-----------------|:---------:|-----------|
+| client-readers-flow-tracer-lagging-metric-num-sample-groups | Maximum number of samples that are kept by ClientReadersFlowTracer for computing relative reading speed in relation to writing speed. See client\_readers\_flow\_tracer\_lagging\_slope\_threshold. | 3 | client&nbsp;only |
+| client-readers-flow-tracer-lagging-metric-sample-group-size | Number of samples in ClientReadersFlowTracer that are aggregated and recorded as one entry. See client-readers-flow-tracer-lagging-metric-sample-group-size. | 20 | client&nbsp;only |
+| client-readers-flow-tracer-lagging-slope-threshold | If a reader's lag increase at at least this rate, the reader is considered lagging (rate given as variation of time lag per time unit). If the desired read ratio needs to be x% of the write ratio, set this threshold to be (1 - x / 100). | -0.3 | client&nbsp;only |
 | enable-adaptive-store-timeout | decides whether to enable an adaptive store timeout | false | **experimental**, server&nbsp;only |
+| rebuilding-max-malformed-records-to-tolerate | Controls how rebuilding donors handle unexpected values in local log store (e.g. caused by bugs, forward incompatibility, or other processes writing unexpected things to rocksdb directly).If rebuilding encounters invalid records, it skips them and logs warnings. But if it encounters at least this many of them in the same log, it freaks out, logs a critical error and stalls indefinitely. The rest of the server keeps trying to run normally, to the extent to which you can run normally when you can't parse most of the records in the DB. | 1000 | requires&nbsp;restart, server&nbsp;only |
 | sync-metadata-log-writes | If set, storage nodes will wait for wal sync of metadata log writes before sending the STORED ack. | true | server&nbsp;only |
 
 ## Write path
@@ -484,6 +496,7 @@ sidebar_label: Settings
 | disable-chain-sending | never send a wave of STORE messages through a chain | false | server&nbsp;only |
 | disable-graylisting | setting this to true disables graylisting nodes by sequencers in the write path | false | server&nbsp;only |
 | disabled-retry-interval | Time interval during which a sequencer will not route record copies to a storage node that reported a permanent error. | 30s | server&nbsp;only |
+| enable-offset-map | Enables the server-side OffsetMap calculation feature.NOTE: There is no guarantee of byte offsets result correctness if featurewas switched on->off->on in period shorter than retention value forlogs. | false | server&nbsp;only |
 | epoch-metadata-use-new-storage-set-format | Serialize copysets using ShardIDs instead of node\_index\_t inside EpochMetaData. TODO(T15517759): enable by default once Flexible Log Sharding is fully implemented and this has been thoroughly tested. | false | **experimental** |
 | gray-list-threshold | if the number of storage nodes graylisted on the write path of a log exceeds this fraction of the log's nodeset size the gray list will be cleared to make sure that copysets can still be picked | 0.25 | server&nbsp;only |
 | isolated-sequencer-ttl | How long we wait before disabling isolated sequencers. A sequencer is declared isolated if nodes outside of the innermost failure domain of the sequencer's epoch appear unreachable to the failure detector. For example, a sequencer of a rack-replicated log epoch is declared isolated if the failure detector can't reach any nodes outside of that sequencer node's rack. A disabled sequencer rejects all append requests. | 1200s | server&nbsp;only |

@@ -5,23 +5,24 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <functional>
-
 #include <cstring>
+#include <functional>
 
 #include <folly/Memory.h>
 #include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 
 #include "event2/buffer.h"
+#include "logdevice/common/Metadata.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/libevent/compat.h"
 #include "logdevice/common/protocol/APPEND_Message.h"
 #include "logdevice/common/protocol/CLEAN_Message.h"
 #include "logdevice/common/protocol/DELETE_Message.h"
+#include "logdevice/common/protocol/GET_EPOCH_RECOVERY_METADATA_Message.h"
+#include "logdevice/common/protocol/GET_EPOCH_RECOVERY_METADATA_REPLY_Message.h"
 #include "logdevice/common/protocol/HELLO_Message.h"
 #include "logdevice/common/protocol/MessageDeserializers.h"
 #include "logdevice/common/protocol/MessageTypeNames.h"
@@ -30,15 +31,13 @@
 #include "logdevice/common/protocol/RECORD_Message.h"
 #include "logdevice/common/protocol/SEALED_Message.h"
 #include "logdevice/common/protocol/SHUTDOWN_Message.h"
-#include "logdevice/common/protocol/START_Message.h"
 #include "logdevice/common/protocol/STARTED_Message.h"
+#include "logdevice/common/protocol/START_Message.h"
 #include "logdevice/common/protocol/STOP_Message.h"
 #include "logdevice/common/protocol/STORE_Message.h"
-#include "logdevice/common/protocol/GET_EPOCH_RECOVERY_METADATA_Message.h"
-#include "logdevice/common/protocol/GET_EPOCH_RECOVERY_METADATA_REPLY_Message.h"
-#include "logdevice/common/Metadata.h"
 #include "logdevice/common/request_util.h"
 #include "logdevice/common/test/TestUtil.h"
+#include "logdevice/common/util.h"
 
 namespace arg = std::placeholders;
 
@@ -59,7 +58,6 @@ void DO_TEST(const SomeMessage& m,
     struct evbuffer* evbuf = LD_EV(evbuffer_new)();
     ProtocolWriter writer(m.type_, evbuf, proto);
     m.serialize(writer);
-    writer.endSerialization();
     ssize_t sz = writer.result();
     ASSERT_EQ(writer.status(), proto_writer_status);
     if (proto_writer_status != E::OK) {
@@ -106,7 +104,6 @@ static std::string getPayload(const PayloadHolder& h) {
   ProtocolWriter writer(
       MessageType::STORE, evbuf, Compatibility::MAX_PROTOCOL_SUPPORTED);
   h.serialize(writer);
-  writer.endSerialization();
   ssize_t sz = writer.result();
   EXPECT_GE(sz, 0);
   std::string s(sz, '\0');
@@ -154,26 +151,12 @@ class MessageSerializationTest : public ::testing::Test {
     }
 
     ASSERT_EQ(sent.block_starting_lsn_, recv.block_starting_lsn_);
-    if (proto >= Compatibility::APPEND_WITH_OPTIONAL_KEYS) {
-      // When proto >= Compatibility::APPEND_WITH_OPTIONAL_KEYS, recv should
-      // be able to recv multiple keys. So we need to check all keys.
-      ASSERT_EQ(sent.optional_keys_.size(), recv.optional_keys_.size());
-      for (const auto& key_pair : sent.optional_keys_) {
-        ASSERT_NE(recv.optional_keys_.find(key_pair.first),
-                  recv.optional_keys_.end());
-        ASSERT_EQ(
-            recv.optional_keys_.find(key_pair.first)->second, key_pair.second);
-      }
-    } else {
-      // proto < Compatibility::APPEND_WITH_OPTIONAL_KEYS Only KeyType::FINDKEY
-      if (sent.optional_keys_.find(KeyType::FINDKEY) !=
-          sent.optional_keys_.end()) {
-        ASSERT_EQ(sent.optional_keys_.find(KeyType::FINDKEY)->second,
-                  recv.optional_keys_.find(KeyType::FINDKEY)->second);
-      } else {
-        ASSERT_EQ(recv.optional_keys_.find(KeyType::FINDKEY),
-                  recv.optional_keys_.end());
-      }
+    ASSERT_EQ(sent.optional_keys_.size(), recv.optional_keys_.size());
+    for (const auto& key_pair : sent.optional_keys_) {
+      ASSERT_NE(
+          recv.optional_keys_.find(key_pair.first), recv.optional_keys_.end());
+      ASSERT_EQ(
+          recv.optional_keys_.find(key_pair.first)->second, key_pair.second);
     }
 
     if (proto >= Compatibility::STORE_E2E_TRACING_SUPPORT) {
@@ -199,18 +182,7 @@ class MessageSerializationTest : public ::testing::Test {
     ASSERT_EQ(m.header_.seen, m2.header_.seen);
     ASSERT_EQ(m.header_.timeout_ms, m2.header_.timeout_ms);
     ASSERT_EQ(m.header_.flags, m2.header_.flags);
-    if (proto < Compatibility::APPEND_WITH_OPTIONAL_KEYS) {
-      if (m.header_.flags & APPEND_Header::CUSTOM_KEY) {
-        ASSERT_EQ(m.attrs_.optional_keys.at(KeyType::FINDKEY),
-                  m2.attrs_.optional_keys.at(KeyType::FINDKEY));
-      } else {
-        ASSERT_EQ(
-            m.attrs_.optional_keys.size(), m2.attrs_.optional_keys.size());
-        ASSERT_EQ(m.attrs_.optional_keys.size(), 0);
-      }
-    } else {
-      ASSERT_EQ(m.attrs_.optional_keys, m2.attrs_.optional_keys);
-    }
+    ASSERT_EQ(m.attrs_.optional_keys, m2.attrs_.optional_keys);
     ASSERT_EQ(m.attrs_.counters.hasValue(), m2.attrs_.counters.hasValue());
     if (m.attrs_.counters.hasValue()) {
       ASSERT_EQ(m.attrs_.counters->size(), m2.attrs_.counters->size());
@@ -274,7 +246,7 @@ class MessageSerializationTest : public ::testing::Test {
     ASSERT_EQ(m.epoch_lng_, m2.epoch_lng_);
     ASSERT_EQ(m.seal_, m2.seal_);
     ASSERT_EQ(m.last_timestamp_, m2.last_timestamp_);
-    ASSERT_EQ(m.epoch_size_, m2.epoch_size_);
+    ASSERT_EQ(m.epoch_offset_map_, m2.epoch_offset_map_);
 
     if (proto < Compatibility::TAIL_RECORD_IN_SEALED) {
       ASSERT_EQ(0, m2.tail_records_.size());
@@ -438,10 +410,13 @@ struct TestStoreMessageFactory {
         ;
 
     // Take into account OffsetMap bits
-    if (header_.flags & STORE_Header::OFFSET_MAP &&
-        proto >= Compatibility::OFFSET_MAP_SUPPORT) {
-      if (header_.flags & STORE_Header::OFFSET_WITHIN_EPOCH) {
-        rv += "0100";
+    if (proto >= Compatibility::OFFSET_MAP_SUPPORT) {
+      if (header_.flags & STORE_Header::OFFSET_WITHIN_EPOCH &&
+          header_.flags & STORE_Header::OFFSET_MAP) {
+        // Size of offsetmap containing one counter
+        rv += "01";
+        // BYTE_OFFSET start index in hex. refer to OffsetMap.h
+        rv += "F6";
       }
     }
 
@@ -452,18 +427,15 @@ struct TestStoreMessageFactory {
     rv += "010000000400008002000000050000800300000006000080";
 
     if (header_.flags & STORE_Header::CUSTOM_KEY) {
-      if (proto >= Compatibility::APPEND_WITH_OPTIONAL_KEYS) {
-        // When proto >= proto >= Compatibility::APPEND_WITH_OPTIONAL_KEYS,
-        // The protocol is:  1. Send number of keys. For here: "02".
-        //                   2. For each key, send KeyType. Here, "00" or "01"
-        //                   3. Length + serialized key (as before)
-        if (optional_keys_.find(KeyType::FILTERABLE) != optional_keys_.end()) {
-          rv += "0200"; //"02" means 2 optional keys, "00" type for first key
-          rv += key_serialized_;
-          rv += "01"; // "01" type for second key
-        } else {
-          rv += "0100"; // "01" means 1 optional key. "00" type for first key
-        }
+      // The protocol is:  1. Send number of keys. For here: "02".
+      //                   2. For each key, send KeyType. Here, "00" or "01"
+      //                   3. Length + serialized key (as before)
+      if (optional_keys_.find(KeyType::FILTERABLE) != optional_keys_.end()) {
+        rv += "0200"; //"02" means 2 optional keys, "00" type for first key
+        rv += key_serialized_;
+        rv += "01"; // "01" type for second key
+      } else {
+        rv += "0100"; // "01" means 1 optional key. "00" type for first key
       }
       rv += key_serialized_;
     }
@@ -506,7 +478,7 @@ TEST_F(MessageSerializationTest, STORE) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -525,7 +497,7 @@ TEST_F(MessageSerializationTest, STORE_WithKey) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -546,29 +518,8 @@ TEST_F(MessageSerializationTest, STORE_WithFilterableKey) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
-          std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
-          [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
-}
-
-TEST_F(MessageSerializationTest, STORE_WithRebuildingInfo) {
-  STORE_Extra extra;
-  extra.rebuilding_version = 42;
-  extra.rebuilding_wave = 3;
-
-  TestStoreMessageFactory factory;
-  factory.setFlags(STORE_Header::REBUILDING);
-  factory.setExtra(extra, "2A0000000000000003000000");
-
-  STORE_Message m = factory.message();
-  auto check = [&](const STORE_Message& m2, uint16_t proto) {
-    checkSTORE(m, m2, proto);
-  };
-  DO_TEST(m,
-          check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
-          Compatibility::REBUILDING_WITHOUT_WAL_2 - 1,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
 }
@@ -589,7 +540,7 @@ TEST_F(MessageSerializationTest, STORE_WithRebuildingInfo2) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -609,7 +560,7 @@ TEST_F(MessageSerializationTest, STORE_WithByteOffsetInfo) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -651,7 +602,7 @@ TEST_F(MessageSerializationTest, STORE_WithFirstAmendableOffset) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -671,7 +622,7 @@ TEST_F(MessageSerializationTest, STORE_WithE2ETracingContext) {
   };
   DO_TEST(m,
           check,
-          Compatibility::SHARD_ID_IN_STORE_MSG,
+          Compatibility::MIN_PROTOCOL_SUPPORTED,
           Compatibility::MAX_PROTOCOL_SUPPORTED,
           std::bind(&TestStoreMessageFactory::serialized, &factory, arg::_1),
           [](ProtocolReader& r) { return STORE_Message::deserialize(r, 128); });
@@ -688,7 +639,7 @@ TEST_F(MessageSerializationTest, SHUTDOWN_WithServerInstanceId) {
     std::string expected = "17000A00000000000000";
     DO_TEST(m,
             check,
-            Compatibility::REBUILDING_WITHOUT_WAL_2,
+            Compatibility::MIN_PROTOCOL_SUPPORTED,
             Compatibility::MAX_PROTOCOL_SUPPORTED,
             [&](uint16_t /*proto*/) { return expected; },
             nullptr);
@@ -942,7 +893,7 @@ TEST_F(MessageSerializationTest, APPEND) {
     };
     DO_TEST(m,
             check,
-            Compatibility::SERVER_CUSTOM_COUNTER_SUPPORT,
+            Compatibility::MIN_PROTOCOL_SUPPORTED,
             Compatibility::MAX_PROTOCOL_SUPPORTED,
             expected_fn,
             deserializer);
@@ -963,7 +914,7 @@ TEST_F(MessageSerializationTest, APPEND) {
     };
     DO_TEST(m,
             check,
-            Compatibility::SERVER_CUSTOM_COUNTER_SUPPORT,
+            Compatibility::MIN_PROTOCOL_SUPPORTED,
             Compatibility::MAX_PROTOCOL_SUPPORTED,
             expected_fn,
             deserializer);
@@ -980,7 +931,7 @@ TEST_F(MessageSerializationTest, APPEND) {
     };
     DO_TEST(m,
             check,
-            Compatibility::SERVER_CUSTOM_COUNTER_SUPPORT,
+            Compatibility::MIN_PROTOCOL_SUPPORTED,
             Compatibility::MAX_PROTOCOL_SUPPORTED,
             expected_fn,
             deserializer);
@@ -1047,11 +998,18 @@ TEST_F(MessageSerializationTest, SEALED) {
 
   std::vector<TailRecord> tails({genTailRecord(false), genTailRecord(true)});
 
+  OffsetMap o1;
+  o1.setCounter(CounterType::BYTE_OFFSET, 9);
+  OffsetMap o2;
+  o2.setCounter(CounterType::BYTE_OFFSET, 10);
+  OffsetMap o3;
+  o3.setCounter(CounterType::BYTE_OFFSET, 11);
+
   SEALED_Message m(h,
                    {3, 4, 5},
                    Seal(epoch_t(9), NodeID(2, 1)),
                    {6, 7, 8},
-                   {9, 10, 11},
+                   {o1, o2, o3},
                    {13, 14, 15},
                    tails);
   auto check = [&](const SEALED_Message& m2, uint16_t proto) {
@@ -1087,6 +1045,32 @@ TEST_F(MessageSerializationTest, SEALED) {
       DO_TEST(m,
               check,
               Compatibility::TAIL_RECORD_IN_SEALED,
+              Compatibility::OFFSET_MAP_SUPPORT_IN_SEALED_MSG - 1,
+              [&](uint16_t /*proto*/) { return expected; },
+              nullptr);
+      return 0;
+    };
+
+    auto processor = make_test_processor(create_default_settings<Settings>());
+    run_on_worker(processor.get(), /*worker_id=*/0, test);
+  }
+  {
+    std::string expected =
+        "D38347A48A8EC1BB05CE49A8000027FAEBDD3400000003000000070002000000030000"
+        "000000000004000000000000000500000000000000090000000100020001F609000000"
+        "0000000001F60A0000000000000001F60B000000000000000600000000000000070000"
+        "000000000008000000000000000D000000000000000E000000000000000F0000000000"
+        "0000D38347A48A8EC1BB130D0000A5030000F75C8E590000000060540DEE2202000000"
+        "02000000000000D38347A48A8EC1BB130D0000A5030000F75C8E590000000060540DEE"
+        "22020000030200000000000018000000140000005461696C205265636F726420546573"
+        "742E000000";
+
+    // this test involves contructing an evbuffer based payload holder and has
+    // to be done on a worker thread
+    auto test = [&] {
+      DO_TEST(m,
+              check,
+              Compatibility::OFFSET_MAP_SUPPORT_IN_SEALED_MSG,
               Compatibility::MAX_PROTOCOL_SUPPORTED,
               [&](uint16_t /*proto*/) { return expected; },
               nullptr);
@@ -1161,22 +1145,7 @@ TEST_F(MessageSerializationTest, START_num_filtered_out) {
   auto expect = [&](uint16_t proto) {
     if (filtered_out.empty()) {
       // expect num_filtered_out to be 0 and no element in filtered_out
-      if (proto < Compatibility::SERVER_CAN_FILTER_RECORD) {
-        // prior to this protocol, there was no read stream attributes in the
-        // START message, so the serialized payload is different.
-        return "D38347F48F9EC4DC" // log_id
-               "3A3B472C8D47498B" // read_stream_id
-               "0500000000000000" // start_lsn
-               "0D00000000000000" // until_lsn
-               "0800000000000000" // window_high
-               "80000000"         // flags = SINGLE_COPY_DELIVERY
-               "0000"             // required_node_in_copyset
-               "3A3B472C8D47498B" // filter_version
-               "00"               // num_filtered_out = 0
-               "00"               // replication
-               "00"               // scd_copyset_reordering
-               "0000";            // shard
-      } else if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
+      if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
         return "D38347F48F9EC4DC3A3B472C8D47498B05000000000000000D0000000000000"
                "0080000000000000080000000" // flags = SINGLE_COPY_DELIVERY
                "00003A3B472C8D47498B00"    // num_filtered_out = 0
@@ -1190,14 +1159,7 @@ TEST_F(MessageSerializationTest, START_num_filtered_out) {
       }
     } else if (filtered_out.size() == 3) {
       // expect num_filtered_out to be 3 and 3 elements encoded in filtered_out
-      if (proto < Compatibility::SERVER_CAN_FILTER_RECORD) {
-        return "D38347F48F9EC4DC3A3B472C8D47498B05000000000000000D0000000000000"
-               "0080000000000000080000000" // flags = SINGLE_COPY_DELIVERY
-               "00003A3B472C8D47498B03"    // num_filtered_out = 3
-               "0000000000000000"          // N0:S0
-               "01000000"                  // N1:S0
-               "02000000";                 // N2:S0
-      } else if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
+      if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
         return "D38347F48F9EC4DC3A3B472C8D47498B05000000000000000D0000000000000"
                "0080000000000000080000000" // flags = SINGLE_COPY_DELIVERY
                "00003A3B472C8D47498B03"    // num_filtered_out = 3
@@ -1217,30 +1179,7 @@ TEST_F(MessageSerializationTest, START_num_filtered_out) {
       }
     } else if (filtered_out.size() == COPYSET_SIZE_MAX + 1) {
       // expect num_filtered_out to be 128 and as many elements encoded
-      if (proto < Compatibility::SERVER_CAN_FILTER_RECORD) {
-        return "D38347F48F9EC4DC3A3B472C8D47498B05000000000000000D0000000000000"
-               "0080000000000000080000000" // flags = SINGLE_COPY_DELIVERY
-               "00003A3B472C8D47498B80"    // num_filtered_out = 0x80 = 128
-               "0000000000000000"          // N0:S0
-               "01000000"                  // ...
-               "020000000300000004000000050000000600000007000000080000000900000"
-               "00A0000000B0000000C0000000D0000000E0000000F00000010000000110000"
-               "001200000013000000140000001500000016000000170000001800000019000"
-               "0001A0000001B0000001C0000001D0000001E0000001F000000200000002100"
-               "000022000000230000002400000025000000260000002700000028000000290"
-               "000002A0000002B0000002C0000002D0000002E0000002F0000003000000031"
-               "000000320000003300000034000000350000003600000037000000380000003"
-               "90000003A0000003B0000003C0000003D0000003E0000003F00000040000000"
-               "410000004200000043000000440000004500000046000000470000004800000"
-               "0490000004A0000004B0000004C0000004D0000004E0000004F000000500000"
-               "005100000052000000530000005400000055000000560000005700000058000"
-               "000590000005A0000005B0000005C0000005D0000005E0000005F0000006000"
-               "000061000000620000006300000064000000650000006600000067000000680"
-               "00000690000006A0000006B0000006C0000006D0000006E0000006F00000070"
-               "000000710000007200000073000000740000007500000076000000770000007"
-               "8000000790000007A0000007B0000007C0000007D0000007E0000007F00000"
-               "0";
-      } else if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
+      if (proto < Compatibility::SUPPORT_LARGER_FILTERED_OUT_LIST) {
         return "D38347F48F9EC4DC3A3B472C8D47498B05000000000000000D0000000000000"
                "0080000000000000080000000" // flags = SINGLE_COPY_DELIVERY
                "00003A3B472C8D47498B80"    // num_filtered_out = 128
@@ -1498,7 +1437,6 @@ TEST_F(MessageSerializationTest, DrainExtraBytes) {
   }};
   ProtocolWriter w1(hello_msg.type_, evbuf, proto);
   hello_msg.serialize(w1);
-  w1.endSerialization();
   size_t hello_size = w1.result();
   ASSERT_LT(0, hello_size);
   // write some extra bytes after the HELLO message
@@ -1513,7 +1451,6 @@ TEST_F(MessageSerializationTest, DrainExtraBytes) {
   }};
   ProtocolWriter w2(delete_msg.type_, evbuf, proto);
   delete_msg.serialize(w2);
-  w2.endSerialization();
   size_t delete_size = w2.result();
   ASSERT_LT(0, delete_size);
 

@@ -6,9 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include "logdevice/common/ConfigPermissionChecker.h"
-#include "logdevice/common/configuration/Configuration.h"
+
 #include "logdevice/common/PrincipalParser.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 
 namespace facebook { namespace logdevice {
 
@@ -29,7 +30,8 @@ void ConfigPermissionChecker::isAllowed(ACTION action,
   }
 
   auto config = Worker::onThisThread()->getConfig();
-  const LogsConfig::LogGroupNode* log = config->getLogGroupByIDRaw(logid);
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      config->getLogGroupByIDShared(logid);
 
   if (log && log->attrs().permissions()) {
     auto permissions = log->attrs().permissions().value();

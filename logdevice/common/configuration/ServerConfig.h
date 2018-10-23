@@ -14,10 +14,9 @@
 #include <utility>
 
 #include <boost/concept/assert.hpp>
-
-#include <folly/dynamic.h>
 #include <folly/Memory.h>
 #include <folly/Optional.h>
+#include <folly/dynamic.h>
 
 #include "logdevice/common/Address.h"
 #include "logdevice/common/NodeID.h"
@@ -29,11 +28,12 @@
 #include "logdevice/common/configuration/Node.h"
 #include "logdevice/common/configuration/NodesConfig.h"
 #include "logdevice/common/configuration/PrincipalsConfig.h"
-#include "logdevice/common/configuration/SequencersConfig.h"
 #include "logdevice/common/configuration/SecurityConfig.h"
+#include "logdevice/common/configuration/SequencersConfig.h"
 #include "logdevice/common/configuration/TraceLoggerConfig.h"
 #include "logdevice/common/configuration/TrafficShapingConfig.h"
 #include "logdevice/common/configuration/ZookeeperConfig.h"
+#include "logdevice/common/configuration/nodes/NodesConfiguration.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/types.h"
@@ -56,6 +56,7 @@ class ServerConfig {
   using Node = facebook::logdevice::configuration::Node;
   using Nodes = facebook::logdevice::configuration::Nodes;
   using NodesConfig = facebook::logdevice::configuration::NodesConfig;
+  using NodesConfiguration = configuration::nodes::NodesConfiguration;
   using PrincipalsConfig = facebook::logdevice::configuration::PrincipalsConfig;
   using SecurityConfig = facebook::logdevice::configuration::SecurityConfig;
   using SequencersConfig = facebook::logdevice::configuration::SequencersConfig;
@@ -63,10 +64,10 @@ class ServerConfig {
       facebook::logdevice::configuration::TraceLoggerConfig;
   using TrafficShapingConfig =
       facebook::logdevice::configuration::TrafficShapingConfig;
-  using ZookeeperConfig = facebook::logdevice::configuration::ZookeeperConfig;
   using SettingsConfig = std::unordered_map<std::string, std::string>;
   using OptionalTimestamp = folly::Optional<std::chrono::seconds>;
   using InternalLogs = facebook::logdevice::configuration::InternalLogs;
+  using ZookeeperConfig = facebook::logdevice::configuration::ZookeeperConfig;
 
   /**
    * Local overrides of cluster global configuration data. Typically
@@ -136,6 +137,10 @@ class ServerConfig {
 
   void setVersion(config_version_t version) {
     version_ = version;
+  }
+
+  void setNodesConfigurationVersion(config_version_t version) {
+    nodesConfig_.setNodesConfigurationVersion(version);
   }
 
   /**
@@ -216,28 +221,6 @@ class ServerConfig {
    *           NOTFOUND       no node with given ID appears in config
    */
   const Node* getNode(const NodeID& id) const;
-
-  /**
-   * Gets the Zookeeper configuration
-   */
-  const ZookeeperConfig& getZookeeperConfig() const {
-    return zookeeperConfig_;
-  }
-
-  /**
-   * @return if config has a zookeeper section, returns a comma-separated list
-   *         of ip:ports of all ZK servers listed in it. Otherwise returns an
-   *         empty string.
-   */
-  std::string getZookeeperQuorumString() const;
-
-  /**
-   * @return if config has a zookeeper section, returns the session timeout
-   *         specified there, guaranteed to be positive. Otherwise returns 0.
-   */
-  std::chrono::milliseconds getZookeeperTimeout() const {
-    return zookeeperConfig_.session_timeout;
-  }
 
   /**
    * Returns the NodeID of the server that we are running.  (The NodeID needs
@@ -387,27 +370,44 @@ class ServerConfig {
     return metaDataLogsConfig_;
   }
 
+  const NodesConfig& getNodesConfig() const {
+    return nodesConfig_;
+  }
+
+  /**
+   * Get the new representation of cluster nodes (i.e. NodesConfiguration
+   * class).
+   */
+  const std::shared_ptr<const NodesConfiguration>&
+  getNodesConfiguration() const {
+    return nodesConfig_.getNodesConfiguration();
+  }
+
   /**
    * Creates a ServerConfig object from existing cluster name,
-   * NodesConfig, LogsConfig, SecurityConfig and an optional ZookeeperConfig
-   * instances. Public for testing.
+   * NodesConfig, LogsConfig, SecurityConfig instances.
+   *
+   * Note that it regenerates the new NodesConfiguration format from the
+   * existing NodesConfig and MetaDataLogsConfig. returns nullptr if the
+   * conversion failed.
+   *
+   * Public for testing.
    */
   static std::unique_ptr<ServerConfig>
-  fromData(std::string cluster_name,
-           NodesConfig nodes,
-           MetaDataLogsConfig metadata_logs = MetaDataLogsConfig(),
-           PrincipalsConfig = PrincipalsConfig(),
-           SecurityConfig securityConfig = SecurityConfig(),
-           TraceLoggerConfig trace_config = TraceLoggerConfig(),
-           TrafficShapingConfig = TrafficShapingConfig(),
-           ZookeeperConfig zookeeper = ZookeeperConfig(),
-           SettingsConfig server_settings_config = SettingsConfig(),
-           SettingsConfig client_settings_config = SettingsConfig(),
-           InternalLogs internal_logs = InternalLogs(),
-           OptionalTimestamp clusterCreationTime = OptionalTimestamp(),
-           folly::dynamic customFields = folly::dynamic::object,
-           const std::string& ns_delimiter =
-               LogsConfig::default_namespace_delimiter_);
+  fromDataTest(std::string cluster_name,
+               NodesConfig nodes,
+               MetaDataLogsConfig metadata_logs = MetaDataLogsConfig(),
+               PrincipalsConfig = PrincipalsConfig(),
+               SecurityConfig securityConfig = SecurityConfig(),
+               TraceLoggerConfig trace_config = TraceLoggerConfig(),
+               TrafficShapingConfig = TrafficShapingConfig(),
+               SettingsConfig server_settings_config = SettingsConfig(),
+               SettingsConfig client_settings_config = SettingsConfig(),
+               InternalLogs internal_logs = InternalLogs(),
+               OptionalTimestamp clusterCreationTime = OptionalTimestamp(),
+               folly::dynamic customFields = folly::dynamic::object,
+               const std::string& ns_delimiter =
+                   LogsConfig::default_namespace_delimiter_);
 
   /**
    * Returns a duplicate of the configuration.
@@ -419,12 +419,6 @@ class ServerConfig {
    * replaced by the parameter.
    */
   std::shared_ptr<ServerConfig> withNodes(NodesConfig) const;
-
-  /**
-   * Returns a clone of the ServerConfig object with the Zookeeper section
-   * replaced by the parameter.
-   */
-  std::shared_ptr<ServerConfig> withZookeeperConfig(ZookeeperConfig zk) const;
 
   /**
    * Returns a clone of the ServerConfig object with version replaced by the
@@ -538,8 +532,10 @@ class ServerConfig {
   }
 
   const std::string toString(const LogsConfig* with_logs = nullptr,
+                             const ZookeeperConfig* with_zk = nullptr,
                              bool compress = false) const;
-  folly::dynamic toJson(const LogsConfig* with_logs = nullptr) const;
+  folly::dynamic toJson(const LogsConfig* with_logs = nullptr,
+                        const ZookeeperConfig* with_zk = nullptr) const;
 
  private:
   //
@@ -553,7 +549,6 @@ class ServerConfig {
                SecurityConfig securityConfig,
                TraceLoggerConfig traceLoggerConfig,
                TrafficShapingConfig trafficShapingConfig,
-               ZookeeperConfig zookeeperConfig,
                SettingsConfig serverSettingsConfig,
                SettingsConfig clientSettingsConfig,
                InternalLogs internalLogs,
@@ -565,8 +560,28 @@ class ServerConfig {
   ServerConfig& operator=(const ServerConfig&) = delete;
   ServerConfig& operator=(ServerConfig&&) = delete;
 
+  // Creates a ServerConfig object from existing cluster name,
+  // NodesConfig, LogsConfig, SecurityConfig and an optional ZookeeperConfig
+  // instances.
+  static std::unique_ptr<ServerConfig>
+  fromData(std::string cluster_name,
+           NodesConfig nodes,
+           MetaDataLogsConfig metadata_logs = MetaDataLogsConfig(),
+           PrincipalsConfig = PrincipalsConfig(),
+           SecurityConfig securityConfig = SecurityConfig(),
+           TraceLoggerConfig trace_config = TraceLoggerConfig(),
+           TrafficShapingConfig = TrafficShapingConfig(),
+           SettingsConfig server_settings_config = SettingsConfig(),
+           SettingsConfig client_settings_config = SettingsConfig(),
+           InternalLogs internal_logs = InternalLogs(),
+           OptionalTimestamp clusterCreationTime = OptionalTimestamp(),
+           folly::dynamic customFields = folly::dynamic::object,
+           const std::string& ns_delimiter =
+               LogsConfig::default_namespace_delimiter_);
+
   std::string clusterName_;
   OptionalTimestamp clusterCreationTime_;
+
   NodesConfig nodesConfig_;
   MetaDataLogsConfig metaDataLogsConfig_;
   PrincipalsConfig principalsConfig_;
@@ -574,8 +589,6 @@ class ServerConfig {
   SequencersConfig sequencersConfig_;
   TrafficShapingConfig trafficShapingConfig_;
   TraceLoggerConfig traceLoggerConfig_;
-  ZookeeperConfig zookeeperConfig_; // .quorum is empty if "zookeeper" section
-                                    // is not present in the config
   SettingsConfig serverSettingsConfig_;
   SettingsConfig clientSettingsConfig_;
   configuration::InternalLogs internalLogs_;
@@ -598,7 +611,8 @@ class ServerConfig {
    */
   folly::dynamic customFields_;
 
-  std::string toStringImpl(const LogsConfig* with_logs) const;
+  std::string toStringImpl(const LogsConfig* with_logs,
+                           const ZookeeperConfig* with_zk) const;
   mutable std::mutex to_string_cache_mutex_;
   mutable std::string all_to_string_cache_; // includes the logs config
   mutable std::string compressed_all_to_string_cache_;

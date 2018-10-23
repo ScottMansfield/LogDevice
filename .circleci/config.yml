@@ -1,4 +1,7 @@
 aliases:
+  - &filter-ignore-gh-pages
+    branches:
+      ignore: gh-pages
   - &filter-only-master
     branches:
       only: master
@@ -12,7 +15,7 @@ jobs:
     steps:
       - checkout
       - run: apt-get update
-      - run: apt-get install -y ca-certificates xsltproc $(cat logdevice/build_tools/ubuntu.deps)
+      - run: apt-get install -y ca-certificates doxygen xsltproc $(cat logdevice/build_tools/ubuntu.deps)
       - run: git reset --hard HEAD
       - run: git submodule sync
       - run: git submodule update --init
@@ -35,6 +38,19 @@ jobs:
           command: |
             xsltproc ../.circleci/conv.xsl Testing/*/Test.xml > ../gtest_results/unit_tests/results.xml
           when: always
+      - run:
+          name: Generate Documentation
+          working_directory: _build
+          command: |
+            make -j 8 docs
+      - run:
+          name: Ensure docs not modified by build
+          command: git diff -s --exit-code -- docs
+      - persist_to_workspace:
+          root: .
+          paths:
+            - website
+            - docs
       - store_artifacts:
           path: gtest_results
           when: always
@@ -47,8 +63,11 @@ jobs:
     resource_class: large
     steps:
       - checkout
+      - attach_workspace:
+          at: /tmp/workspace
       - run:
           name: Deploy LogDevice website
+          working_directory: /tmp/workspace
           command: |
             # Configure Docusaurus Bot
             git config --global user.email "docusaurus-bot@users.noreply.github.com"
@@ -61,6 +80,9 @@ workflows:
   version: 2
   build_and_deploy:
     jobs:
-      - build
+      - build:
+          filters: *filter-ignore-gh-pages
       - deploy-website:
           filters: *filter-only-master
+          requires:
+            - build

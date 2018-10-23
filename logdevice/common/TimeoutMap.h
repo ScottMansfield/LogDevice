@@ -7,13 +7,12 @@
  */
 #pragma once
 
-#include "time.h"
-
 #include <chrono>
-#include <unordered_map>
 #include <functional>
+#include <unordered_map>
 
 #include "event2/event.h"
+#include "time.h"
 
 namespace facebook { namespace logdevice {
 
@@ -64,6 +63,8 @@ class TimeoutMap {
    */
   const struct timeval* get(std::chrono::microseconds timeout,
                             struct timeval* tv_buf);
+
+  bool add(std::chrono::microseconds timeout, const struct timeval* tv_buf);
 
  private:
   std::unordered_map<std::chrono::microseconds,

@@ -14,12 +14,12 @@
 #include <folly/small_vector.h>
 
 #include "logdevice/common/DataRecordOwnsPayload.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/Random.h"
-#include "logdevice/common/util.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/RECORD_Message.h"
 #include "logdevice/common/protocol/STORE_Message.h"
+#include "logdevice/common/util.h"
 #include "logdevice/server/read_path/IteratorCache.h"
 
 namespace facebook { namespace logdevice { namespace LocalLogStoreReader {
@@ -83,7 +83,12 @@ Status readImpl(LocalLogStore::ReadIterator& read_iterator,
     STAT_INCR(stats, read_streams_num_ops_rebuilding);
   }
 
+  size_t prev_block_bytes_read = read_iterator.getIOBytesUnnormalized();
+
   SCOPE_EXIT {
+    size_t block_bytes_read =
+        read_iterator.getIOBytesUnnormalized() - prev_block_bytes_read;
+
     STAT_ADD(
         stats, read_streams_num_records_read, read_ctx->it_stats_.read_records);
     STAT_ADD(stats,
@@ -111,6 +116,7 @@ Status readImpl(LocalLogStore::ReadIterator& read_iterator,
     STAT_ADD(stats,
              read_streams_num_csi_entries_sent,
              read_ctx->it_stats_.sent_csi_entries);
+    STAT_ADD(stats, read_streams_block_bytes_read, block_bytes_read);
     if (read_ctx->rebuilding_) {
       PER_SHARD_STAT_ADD(stats,
                          read_streams_num_records_read_rebuilding,
@@ -133,6 +139,10 @@ Status readImpl(LocalLogStore::ReadIterator& read_iterator,
                          read_streams_num_csi_bytes_read_rebuilding,
                          read_iterator.getStore()->getShardIdx(),
                          read_ctx->it_stats_.read_csi_bytes);
+      PER_SHARD_STAT_ADD(stats,
+                         read_streams_block_bytes_read_rebuilding,
+                         read_iterator.getStore()->getShardIdx(),
+                         block_bytes_read);
       STAT_ADD(stats,
                read_streams_num_records_filtered_rebuilding,
                read_ctx->it_stats_.filtered_records);

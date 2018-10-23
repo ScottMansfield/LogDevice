@@ -9,11 +9,12 @@
 
 #include <array>
 #include <string>
+
 #include <folly/Optional.h>
 
+#include "logdevice/common/NodeID.h"
 #include "logdevice/include/EnumMap.h"
 #include "logdevice/include/NodeLocationScope.h"
-#include "logdevice/common/NodeID.h"
 
 namespace facebook { namespace logdevice {
 
@@ -189,6 +190,10 @@ class NodeLocation {
   static bool validDomain(const std::string& location_str) {
     NodeLocation tmp;
     return tmp.fromDomainString(location_str) == 0;
+  }
+
+  bool operator==(const NodeLocation& rhs) const {
+    return labels_ == rhs.labels_ && num_specified_ == rhs.num_specified_;
   }
 
  private:

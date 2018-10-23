@@ -6,17 +6,19 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "logdevice/common/GetTrimPointRequest.h"
+
 #include <functional>
-#include <gtest/gtest.h>
 
 #include <folly/Memory.h>
-#include "logdevice/common/GetTrimPointRequest.h"
-#include "logdevice/common/test/TestUtil.h"
-#include "logdevice/include/types.h"
+#include <gtest/gtest.h>
+
 #include "logdevice/common/debug.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
 #include "logdevice/common/test/MockNodeSetAccessor.h"
 #include "logdevice/common/test/MockNodeSetFinder.h"
+#include "logdevice/common/test/TestUtil.h"
+#include "logdevice/include/types.h"
 
 using namespace facebook::logdevice;
 
@@ -33,7 +35,7 @@ class MockGetTrimPointRequest : public GetTrimPointRequest {
         createMetaDataLogsConfig(nodes_config,
                                  nodes_config.getNodes().size(),
                                  replication.getReplicationFactor());
-    config_ = ServerConfig::fromData(
+    config_ = ServerConfig::fromDataTest(
         __FILE__, std::move(nodes_config), std::move(meta_config));
 
     storage_set_.reserve(storage_set_size);

@@ -5,21 +5,23 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/server/locallogstore/RocksDBLocalLogStore.h"
+
 #include <memory>
 
 #include <folly/Memory.h>
 #include <folly/ScopeGuard.h>
-#include "logdevice/common/configuration/InternalLogs.h"
+#include <gtest/gtest.h>
+
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/Metadata.h"
+#include "logdevice/common/configuration/InternalLogs.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/types.h"
 #include "logdevice/server/locallogstore/LocalLogStore.h"
 #include "logdevice/server/locallogstore/PartitionedRocksDBStore.h"
-#include "logdevice/server/locallogstore/RocksDBLocalLogStore.h"
 #include "logdevice/server/locallogstore/WriteOps.h"
 #include "logdevice/server/locallogstore/test/TemporaryLogStore.h"
 #include "rocksdb/db.h"
@@ -213,14 +215,15 @@ TEST_F(RocksDBLocalLogStoreTest, WriteTest) {
       continue;
     }
 
+    // clang-format off
     unsigned char expected_key[] = {
         'd',                                  // header
         0,    0,    0,    0,    0, 0, 0, 123, // log id
         0,    0,    0,    0,    0, 0, 1, 255, // lsn
-        0xee, 0xee, 0xee, 0xee,               // wave  TODO(#10357210) remove
     };
-    static_assert(sizeof expected_key == 21, "must be 21 bytes");
-    EXPECT_EQ(21, it->key().size());
+    // clang-format on
+    static_assert(sizeof expected_key == 17, "must be 17 bytes");
+    EXPECT_EQ(17, it->key().size());
     EXPECT_EQ(0, memcmp(it->key().data(), expected_key, sizeof expected_key));
     EXPECT_EQ(getHeader().size + strlen("abc1"), it->value().size());
     EXPECT_EQ(

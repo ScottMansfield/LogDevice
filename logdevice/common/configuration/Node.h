@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
+ * Copyright (c) 2017-present, Facebook, Inc. and its tffiliates.
  * All rights reserved.
  *
  * This source code is licensed under the BSD-style license found in the
@@ -7,18 +7,19 @@
  */
 #pragma once
 
+#include <bitset>
 #include <chrono>
 #include <memory>
 #include <unordered_map>
 
-#include <bitset>
 #include <folly/Optional.h>
+
 #include "logdevice/common/NodeID.h"
-#include "logdevice/common/configuration/NodeLocation.h"
-#include "logdevice/common/configuration/ReplicationProperty.h"
 #include "logdevice/common/ShardID.h"
 #include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/Socket-fwd.h"
+#include "logdevice/common/configuration/NodeLocation.h"
+#include "logdevice/common/configuration/ReplicationProperty.h"
 
 #define NUM_ROLES 2
 
@@ -128,8 +129,10 @@ struct Node {
    * generation) pair where the generation is less than what is in the
    * config, the system knows that the host referred to by the pair is
    * dead.
+   *
+   * Note: default to 1 as generation <= 0 doesn't make sense.
    */
-  int generation;
+  int generation{1};
 
   /**
    * Location information of the node.

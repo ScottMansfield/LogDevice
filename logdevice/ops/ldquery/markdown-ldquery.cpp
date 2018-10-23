@@ -5,9 +5,9 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include "LDQuery.h"
-
 #include <iostream>
+
+#include "LDQuery.h"
 #include "logdevice/common/util.h"
 
 using facebook::logdevice::markdown_sanitize;
@@ -31,6 +31,13 @@ int main(int argc, char** argv) {
   std::vector<TableMetadata> tables = ldq.getTables();
 
   std::sort(tables.begin(), tables.end(), order_by_name);
+
+  cout << "---" << endl;
+  cout << "id: LDQuery" << endl;
+  cout << "title: LDQuery" << endl;
+  cout << "sidebar_label: LDQuery" << endl;
+  cout << "---" << endl;
+  cout << endl;
 
   for (const TableMetadata& tm : tables) {
     cout << "## " << markdown_sanitize(tm.name) << endl;

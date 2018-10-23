@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+
 #include <folly/experimental/TestUtil.h>
 
 #include "logdevice/common/configuration/Configuration.h"
@@ -21,13 +22,14 @@
 #include "logdevice/common/protocol/MessageType.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/common/settings/util.h"
-#include "logdevice/include/debug.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/Record.h"
+#include "logdevice/include/debug.h"
 
 namespace facebook { namespace logdevice {
 
-class PluginPack;
+class LegacyPluginPack;
+class PluginRegistry;
 
 // Timeout shared by many tests, especially integration tests
 
@@ -277,7 +279,8 @@ make_test_processor(const Settings& settings,
                     std::shared_ptr<UpdateableConfig> config = nullptr,
                     StatsHolder* stats = nullptr);
 
-std::shared_ptr<PluginPack> make_test_plugin_pack();
+std::shared_ptr<LegacyPluginPack> make_test_plugin_pack();
+std::shared_ptr<PluginRegistry> make_test_plugin_registry();
 
 // verifies that file exists and returns the filename if it does. Throws
 // an instance of std::runtime_error otherwise

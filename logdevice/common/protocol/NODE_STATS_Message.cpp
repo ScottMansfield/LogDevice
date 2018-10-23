@@ -10,10 +10,10 @@
 
 #include <folly/stats/BucketedTimeSeries.h>
 
-#include "logdevice/common/Worker.h"
-#include "logdevice/common/Processor.h"
 #include "logdevice/common/Address.h"
+#include "logdevice/common/Processor.h"
 #include "logdevice/common/Sender.h"
+#include "logdevice/common/Worker.h"
 #include "logdevice/common/protocol/NODE_STATS_REPLY_Message.h"
 
 namespace facebook { namespace logdevice {
@@ -78,10 +78,6 @@ void NODE_STATS_Message::onSent(Status /*status*/,
                                 const Address& /*to*/) const {
   // onSent lives in lib/NODE_STATS_onSent.cpp, this should never be called
   std::abort();
-}
-
-uint16_t NODE_STATS_Message::getMinProtocolVersion() const {
-  return Compatibility::ProtocolVersion::CLIENT_SEND_NODE_STATS;
 }
 
 void NODE_STATS_Message::storeReceivedStats(ClientID from) {

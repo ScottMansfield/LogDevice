@@ -7,25 +7,24 @@
  */
 #include "EpochStore.h"
 
-#include "../Table.h"
-#include "../Utils.h"
-
 #include <string>
 
 #include <folly/Conv.h>
 #include <folly/json.h>
 
-#include "logdevice/common/configuration/Configuration.h"
+#include "../Table.h"
+#include "../Utils.h"
 #include "logdevice/common/FileEpochStore.h"
-#include "logdevice/common/configuration/ReplicationProperty.h"
 #include "logdevice/common/Semaphore.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/ZookeeperClient.h"
 #include "logdevice/common/ZookeeperEpochStore.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/configuration/ReplicationProperty.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/ops/ldquery/Errors.h"
 #include "logdevice/lib/ClientImpl.h"
 #include "logdevice/lib/ops/LogMetaDataFetcher.h"
+#include "logdevice/ops/ldquery/Errors.h"
 
 using facebook::logdevice::Configuration;
 
@@ -90,7 +89,7 @@ std::shared_ptr<TableData> EpochStore::getData(QueryContext& ctx) {
 
   std::shared_ptr<logdevice::EpochStore> epoch_store;
 
-  auto zookeeper_quorum = config->serverConfig()->getZookeeperQuorumString();
+  auto zookeeper_quorum = config->zookeeperConfig()->getQuorumString();
   if (zookeeper_quorum.empty()) {
     // There is no zookeeper quorum.
     folly::StringPiece config_path{getContext().config_path};
@@ -113,10 +112,12 @@ std::shared_ptr<TableData> EpochStore::getData(QueryContext& ctx) {
         client_impl->getConfig()->updateableServerConfig());
   } else {
     try {
+      auto upd_config = client_impl->getConfig();
       epoch_store = std::make_shared<ZookeeperEpochStore>(
           config->serverConfig()->getClusterName(),
           &(client_impl->getProcessor()),
-          client_impl->getConfig()->updateableServerConfig(),
+          upd_config->updateableZookeeperConfig(),
+          upd_config->updateableServerConfig(),
           client_impl->getProcessor().updateableSettings(),
           zkFactoryProd);
     } catch (const ConstructorFailed&) {

@@ -5,19 +5,20 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/Checksum.h"
+
 #include <memory>
-#include <gtest/gtest.h>
 
 #include <folly/ScopeGuard.h>
+#include <gtest/gtest.h>
 
 #include "event2/buffer.h"
-#include "logdevice/common/Checksum.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/libevent/compat.h"
 #include "logdevice/common/protocol/APPEND_Message.h"
 #include "logdevice/common/protocol/ProtocolReader.h"
 #include "logdevice/common/protocol/ProtocolWriter.h"
 #include "logdevice/common/protocol/RECORD_Message.h"
+#include "logdevice/common/util.h"
 
 namespace facebook { namespace logdevice {
 
@@ -87,7 +88,6 @@ std::unique_ptr<RECORD_Message> ChecksumTest::roundTrip(
                           ap_send_evbuf,
                           Compatibility::MAX_PROTOCOL_SUPPORTED);
     ap_send_msg.serialize(writer);
-    writer.endSerialization();
     ssize_t ap_send_size = writer.result();
     ld_check(ap_send_size > 0);
 
@@ -125,7 +125,6 @@ std::unique_ptr<RECORD_Message> ChecksumTest::roundTrip(
                         record_send_evbuf,
                         Compatibility::MAX_PROTOCOL_SUPPORTED);
   record_send_msg.serialize(writer);
-  writer.endSerialization();
   ssize_t record_send_size = writer.result();
   ld_check(record_send_size > 0);
 

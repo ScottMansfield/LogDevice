@@ -9,6 +9,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+
 #include "logdevice/common/Request.h"
 #include "logdevice/common/SocketCallback.h"
 #include "logdevice/common/protocol/LOGS_CONFIG_API_Message.h"
@@ -17,7 +18,7 @@ namespace facebook { namespace logdevice {
 
 class LogsConfigApiRequest;
 class ExponentialBackoffTimer;
-class LibeventTimer;
+class Timer;
 
 // Wrapper instead of typedef to allow forward-declaration in Worker.h
 struct LogsConfigApiRequestMap {
@@ -110,7 +111,7 @@ class LogsConfigApiRequest : public Request {
   const uint64_t host_selection_seed_;
   log_management_request_callback_t callback_;
   // a timeout timer to avoid waiting indefinitely for a response from the RSM
-  std::unique_ptr<LibeventTimer> timeout_timer_;
+  std::unique_ptr<Timer> timeout_timer_;
   // a retry timer that calls onRetry(), this is mainly used to try different
   // server nodes if connection has failed or if the RSM responded with
   // E::AGAIN which means that the RSM is still replaying and not ready for

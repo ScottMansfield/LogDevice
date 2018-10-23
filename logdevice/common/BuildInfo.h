@@ -13,19 +13,21 @@
 
 #include <folly/dynamic.h>
 
+#include "logdevice/common/plugin/Plugin.h"
+#include "logdevice/common/plugin/PluginRegistry.h"
 #include "logdevice/common/version.h"
 
 /**
  * @file If the build system can bake build information into the binary, this
  * interface can be implemented (and hooked up via the plugin interface; see
- * PluginPack.h) to provide it.  The server will log the build info at
+ * LegacyPluginPack.h) to provide it.  The server will log the build info at
  * startup and expose it through operational channels (admin commands,
  * ldshell).
  */
 
 namespace facebook { namespace logdevice {
 
-class BuildInfo {
+class BuildInfo : public Plugin {
  public:
   static constexpr char const* BUILD_USER_KEY = "str_build_user";
   static constexpr char const* BUILD_PACKAGE_NAME_KEY =
@@ -40,6 +42,20 @@ class BuildInfo {
       "str_build_upstream_revision";
   static constexpr char const* BUILD_UPSTREAM_REVISION_TIME_KEY =
       "int_build_upstream_revision_commit_time";
+
+  PluginType type() const override {
+    return PluginType::BUILD_INFO;
+  }
+
+  // Plugin identifier
+  std::string identifier() const override {
+    return PluginRegistry::kBuiltin().str();
+  }
+
+  // Plugin display name
+  std::string displayName() const override {
+    return "built-in";
+  }
 
   /**
    * Short string that describes the version.

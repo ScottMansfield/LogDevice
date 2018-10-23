@@ -22,9 +22,9 @@
 #include <rocksdb/status.h>
 
 #include "logdevice/common/ConstructorFailed.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/MetaDataLog.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/util.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/server/locallogstore/IteratorSearch.h"
@@ -253,14 +253,14 @@ int RocksDBLocalLogStore::findKey(logid_t log_id,
   do {                                                                     \
     AddContext opContxt(#opname);                                          \
     auto* perf_context = ROCKSDB_PERF_CONTEXT();                           \
-    uint64_t prev_reads = perf_context->block_read_count;                  \
+    uint64_t prev_reads = perf_context->block_read_byte;                   \
     uint64_t prev_hits = perf_context->block_cache_hit_count;              \
     (iterator)->op;                                                        \
     ROCKSDB_COUNT_STAT(itname##_##opname##_reads, 1);                      \
-    if (prev_reads != perf_context->block_read_count) {                    \
+    if (prev_reads != perf_context->block_read_byte) {                     \
       ROCKSDB_COUNT_STAT(itname##_##opname##_reads_from_disk, 1);          \
-      ROCKSDB_COUNT_STAT(itname##_##opname##_blocks_read_from_disk,        \
-                         perf_context->block_read_count - prev_reads);     \
+      ROCKSDB_COUNT_STAT(itname##_##opname##_block_bytes_read_from_disk,   \
+                         perf_context->block_read_byte - prev_reads);      \
     }                                                                      \
     if (prev_hits != perf_context->block_cache_hit_count) {                \
       ROCKSDB_COUNT_STAT(itname##_##opname##_reads_from_block_cache, 1);   \
@@ -780,12 +780,11 @@ void RocksDBLocalLogStore::CSIWrapper::moveTo(const Location& target,
     if (stats && stats->readLimitReached()) {
       // Some limit reached. We should probably stop. But:
       //  * If we haven't made any progress, don't stop yet. Otherwise we
-      //  could
-      //    get into an infinite loop if the limit is set too small.
+      //    could get into an infinite loop if the limit is set too small.
       //  * If we're doing a seek but know in advance that we're above
-      //  timestamp
+      //    timestamp
       //    window, stop immediately without even seeking any subiterators.
-      //    This is useful for rebuilding: normally, timestamp window is
+      //    This is useful for LogRebuilding: normally, timestamp window is
       //    aligned with partition boundaries, and this check prevents us from
       //    creating iterators in the partition we're not interested in.
       if (current != target || (!near && stats->hardLimitReached())) {
@@ -1121,16 +1120,9 @@ Slice RocksDBLocalLogStore::CSIWrapper::CopySetIndexIterator::getCurrentRecord()
     const {
   ld_check(state() == IteratorState::AT_RECORD);
   LocalLogStoreRecordFormat::flags_t flags =
+      LocalLogStoreRecordFormat::copySetIndexFlagsToRecordFlags(
+          current_single_flags_) |
       LocalLogStoreRecordFormat::FLAG_CSI_DATA_ONLY;
-  if (current_single_flags_ & LocalLogStoreRecordFormat::CSI_FLAG_HOLE) {
-    flags |= LocalLogStoreRecordFormat::FLAG_HOLE;
-  }
-  if (current_single_flags_ & LocalLogStoreRecordFormat::CSI_FLAG_DRAINED) {
-    flags |= LocalLogStoreRecordFormat::FLAG_DRAINED;
-  }
-  if (current_single_flags_ & LocalLogStoreRecordFormat::CSI_FLAG_SHARD_ID) {
-    flags |= LocalLogStoreRecordFormat::FLAG_SHARD_ID;
-  }
   return LocalLogStoreRecordFormat::formRecordHeader(
       0,                            // timestamp
       ESN_INVALID,                  // last known good

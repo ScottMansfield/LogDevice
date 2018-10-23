@@ -12,7 +12,6 @@
 #include "logdevice/common/AllSequencers.h"
 #include "logdevice/common/Appender.h"
 #include "logdevice/common/AppenderBuffer.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/EpochMetaData.h"
 #include "logdevice/common/EpochMetaDataMap.h"
 #include "logdevice/common/EpochSequencer.h"
@@ -27,6 +26,7 @@
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Socket.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/APPEND_Message.h"
 #include "logdevice/common/protocol/RELEASE_Message.h"
@@ -246,7 +246,7 @@ ActivateResult Sequencer::completeActivationWithMetaData(
       onMetaDataMapUpdate(metadata_result.second);
     } break;
     case UpdateMetaDataMapResult::READ_METADATA_LOG:
-      getHistoricalMetaData();
+      getHistoricalMetaData(GetHistoricalMetaDataMode::IMMEDIATE);
       break;
   }
 
@@ -256,6 +256,9 @@ ActivateResult Sequencer::completeActivationWithMetaData(
 
     // 6. start ansyc GetTrimPointRequest if neceessary
     startGetTrimPointRequest();
+
+    // 7. start timer to periodically read and refresh the metadata map.
+    getHistoricalMetaData(GetHistoricalMetaDataMode::PERIODIC);
   }
 
   return (draining_started ? ActivateResult::GRACEFUL_DRAINING
@@ -412,15 +415,24 @@ class StartDrainTimerRequest : public Request {
 // The request will self-destruct after result is returned
 class GetHistoricalMetaDataRequest : public FireAndForgetRequest {
  public:
-  GetHistoricalMetaDataRequest(logid_t log_id, epoch_t current_epoch)
+  GetHistoricalMetaDataRequest(logid_t log_id,
+                               epoch_t current_epoch,
+                               Sequencer::GetHistoricalMetaDataMode mode)
       : FireAndForgetRequest(RequestType::GET_HISTORICAL_METADATA),
         log_id_(log_id),
-        current_epoch_(current_epoch) {
+        current_epoch_(current_epoch),
+        mode_(mode) {
     ld_check(!MetaDataLog::isMetaDataLog(log_id_));
   }
 
   void executionBody() override {
-    getMetaData();
+    switch (mode_) {
+      case Sequencer::GetHistoricalMetaDataMode::PERIODIC:
+        startPeriodicUpdateMetadataMap();
+        break;
+      case Sequencer::GetHistoricalMetaDataMode::IMMEDIATE:
+        getMetaData();
+    }
   }
 
   void getMetaData() {
@@ -456,22 +468,68 @@ class GetHistoricalMetaDataRequest : public FireAndForgetRequest {
     if (should_retry) {
       if (!backoff_timer_) {
         backoff_timer_ = std::make_unique<ExponentialBackoffTimer>(
-            EventLoop::onThisThread()->getEventBase(),
+
             [this]() { getMetaData(); },
             Worker::settings().sequencer_historical_metadata_retry_delay);
         backoff_timer_->randomize();
       }
       backoff_timer_->activate();
-    } else {
+    } else if (mode_ == Sequencer::GetHistoricalMetaDataMode::IMMEDIATE) {
       // job done, destroy the request
       destroy();
       // `this` is destroyed
     }
   }
 
+  void scheduleHistoricalMetaDataUpdate() {
+    // not applicable to metadatalog
+    ld_check(!MetaDataLog::isMetaDataLog(log_id_));
+    ld_check(update_metadata_map_timer_ != nullptr);
+    ld_check(!update_metadata_map_timer_->isActive());
+
+    std::shared_ptr<Sequencer> seq =
+        Worker::onThisThread()->processor_->allSequencers().findSequencer(
+            log_id_);
+    if (seq == nullptr || seq->getState() != Sequencer::State::ACTIVE ||
+        seq->getCurrentEpoch() != current_epoch_) {
+      // destroy the request and stop scheduling more work
+      // when a new sequencer is activate or sequencer is re-activate, it
+      // will start a new request
+      destroy();
+      // the request doesn't exist anymore
+      return;
+    }
+    getMetaData();
+    update_metadata_map_timer_->activate(
+        Worker::settings().update_metadata_map_interval,
+        &Worker::onThisThread()->commonTimeouts());
+    ld_spew("Setting update_metadata_map_timer_ interval to %lu msecs",
+            Worker::settings().update_metadata_map_interval.count());
+  }
+
+  void startPeriodicUpdateMetadataMap() {
+    // not applicable to metadatalog
+    ld_check(!MetaDataLog::isMetaDataLog(log_id_));
+
+    if (update_metadata_map_timer_ == nullptr) {
+      update_metadata_map_timer_ = std::make_unique<Timer>(
+          [this] { scheduleHistoricalMetaDataUpdate(); });
+    }
+    ld_check(!update_metadata_map_timer_->isActive());
+
+    update_metadata_map_timer_->activate(
+        Worker::settings().update_metadata_map_interval,
+        &Worker::onThisThread()->commonTimeouts());
+    ld_spew("Setting update_metadata_map_timer_ interval to %lu msecs",
+            Worker::settings().update_metadata_map_interval.count());
+  }
+
  private:
   const logid_t log_id_;
   const epoch_t current_epoch_;
+  Sequencer::GetHistoricalMetaDataMode mode_{
+      Sequencer::GetHistoricalMetaDataMode::IMMEDIATE};
+  std::unique_ptr<Timer> update_metadata_map_timer_{nullptr};
   std::unique_ptr<NodeSetFinder> nodeset_finder_;
   std::unique_ptr<ExponentialBackoffTimer> backoff_timer_;
 };
@@ -637,12 +695,12 @@ Sequencer::updateMetaDataMap(epoch_t epoch, const EpochMetaData& metadata) {
   return std::make_pair(UpdateMetaDataMapResult::READ_METADATA_LOG, nullptr);
 }
 
-void Sequencer::getHistoricalMetaData() {
+void Sequencer::getHistoricalMetaData(GetHistoricalMetaDataMode mode) {
   // this should never be called on a metadata logid. metadata logs always
   // have their epoch metadata with effective since == EPOCH_MIN.
   ld_check(!MetaDataLog::isMetaDataLog(log_id_));
   std::unique_ptr<Request> rq = std::make_unique<GetHistoricalMetaDataRequest>(
-      log_id_, getCurrentEpoch());
+      log_id_, getCurrentEpoch(), mode);
   Worker::onThisThread()->processor_->postWithRetrying(rq);
 }
 
@@ -1250,7 +1308,8 @@ std::shared_ptr<EpochSequencer>
 Sequencer::createEpochSequencer(epoch_t epoch,
                                 std::unique_ptr<EpochMetaData> metadata) {
   auto cfg = getClusterConfig();
-  const LogsConfig::LogGroupNode* logcfg = cfg->getLogGroupByIDRaw(log_id_);
+  const std::shared_ptr<LogsConfig::LogGroupNode> logcfg =
+      cfg->getLogGroupByIDShared(log_id_);
   if (!logcfg) {
     RATELIMIT_WARNING(std::chrono::seconds(5),
                       5,
@@ -1656,7 +1715,8 @@ void Sequencer::noteConfigurationChanged(std::shared_ptr<Configuration> cfg,
   // Note: nodeset and replication factor are updated upon sequencer
   // activation, with the value from the epochstore. Here we only update
   // properties that do not require an epoch bump.
-  const LogsConfig::LogGroupNode* log = cfg->getLogGroupByIDRaw(log_id_);
+  const std::shared_ptr<LogsConfig::LogGroupNode> log =
+      cfg->getLogGroupByIDShared(log_id_);
   if (!log) {
     // Handle deletion of logs. Drain/abort all epoches and put the Sequencer
     // into UNAVAILABLE state.
@@ -1825,9 +1885,14 @@ std::shared_ptr<const TailRecord> Sequencer::getTailRecord() const {
   if (ret_tail->header.u.offset_within_epoch == BYTE_OFFSET_INVALID ||
       previous_tail->header.u.byte_offset == BYTE_OFFSET_INVALID) {
     ret_tail->header.u.byte_offset = BYTE_OFFSET_INVALID;
+    ret_tail->offsets_map_.setCounter(
+        CounterType::BYTE_OFFSET, BYTE_OFFSET_INVALID);
   } else {
+    // TODO(T33977412) Remove byte_offset when fully deployed
     ret_tail->header.u.byte_offset = previous_tail->header.u.byte_offset +
         current_epoch_tail->header.u.offset_within_epoch;
+    ret_tail->offsets_map_.setCounter(
+        CounterType::BYTE_OFFSET, ret_tail->header.u.byte_offset);
   }
 
   ld_check(!ret_tail->containOffsetWithinEpoch());

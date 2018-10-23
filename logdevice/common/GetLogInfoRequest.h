@@ -13,15 +13,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/ExponentialBackoffTimer.h"
 #include "logdevice/common/GetLogInfoFromNodeRequest.h"
 #include "logdevice/common/GetLogInfoRequestSharedState.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/RequestType.h"
 #include "logdevice/common/SocketCallback.h"
+#include "logdevice/common/Timer.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/include/Client.h"
 
 namespace facebook { namespace logdevice {
@@ -148,7 +148,7 @@ class GetLogInfoRequest : public Request {
   // If we haven't received a response from that request until client_timeout_
   // expires, this timer will fire and attempt to change our target and post a
   // new GetLogInfoFromNodeRequest
-  std::unique_ptr<LibeventTimer> target_change_timer_;
+  std::unique_ptr<Timer> target_change_timer_;
 
   // This timer is activated whenever we need to retry posting a new
   // GetLogInfoFromNodeRequest after the previous one failed. Note that only

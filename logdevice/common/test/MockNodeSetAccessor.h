@@ -8,12 +8,12 @@
 #pragma once
 #include <functional>
 
-#include "logdevice/include/types.h"
-#include "logdevice/common/LibeventTimer.h"
+#include "logdevice/common/NodeSetAccessor.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
-#include "logdevice/common/NodeSetAccessor.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
+#include "logdevice/include/types.h"
 
 namespace facebook { namespace logdevice {
 
@@ -37,12 +37,11 @@ class MockStorageSetAccessor : public StorageSetAccessor {
                            property,
                            timeout) {}
 
-  std::unique_ptr<LibeventTimer>
-  createJobTimer(std::function<void()>) override {
+  std::unique_ptr<Timer> createJobTimer(std::function<void()>) override {
     return nullptr;
   }
 
-  std::unique_ptr<LibeventTimer>
+  std::unique_ptr<Timer>
   createGracePeriodTimer(std::function<void()>) override {
     return nullptr;
   }

@@ -10,20 +10,20 @@
 #include <cctype>
 #include <limits>
 #include <utility>
-
 #include <zstd.h>
+
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/program_options.hpp>
 #include <boost/thread/thread.hpp>
 #include <folly/String.h>
 
-#include "logdevice/common/commandline_util_chrono.h"
-#include "logdevice/common/debug.h"
-#include "logdevice/common/protocol/MessageTypeNames.h"
 #include "logdevice/common/FileConfigSource.h"
 #include "logdevice/common/Sockaddr.h"
+#include "logdevice/common/commandline_util_chrono.h"
 #include "logdevice/common/configuration/ZookeeperConfigSource.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/Compatibility.h"
+#include "logdevice/common/protocol/MessageTypeNames.h"
 #include "logdevice/common/settings/Validators.h"
 
 using namespace facebook::logdevice::setting_validators;
@@ -966,10 +966,37 @@ void Settings::defineSettings(SettingEasyInit& init) {
        &client_readers_flow_tracer_period,
        "0s",
        validate_nonnegative<ssize_t>(),
-       "Period for logging in logdevice_readers_flow scuba table."
-       "Set it to 0 to disable feature.",
+       "Period for logging in logdevice_readers_flow scuba table and for "
+       "triggering certain sampling actions for monitoring. Set it to 0 to "
+       "disable feature.",
        CLIENT,
        SettingsCategory::Monitoring);
+  init("client-readers-flow-tracer-lagging-metric-num-sample-groups",
+       &client_readers_flow_tracer_lagging_metric_num_sample_groups,
+       "3",
+       validate_nonnegative<ssize_t>(),
+       "Maximum number of samples that are kept by ClientReadersFlowTracer for "
+       "computing relative reading speed in relation to writing speed. See "
+       "client_readers_flow_tracer_lagging_slope_threshold.",
+       CLIENT);
+  init("client-readers-flow-tracer-lagging-metric-sample-group-size",
+       &client_readers_flow_tracer_lagging_metric_sample_group_size,
+       "20",
+       validate_nonnegative<ssize_t>(),
+       "Number of samples in ClientReadersFlowTracer that are aggregated and "
+       "recorded as one entry. See "
+       "client-readers-flow-tracer-lagging-metric-sample-group-size.",
+       CLIENT);
+  init(
+      "client-readers-flow-tracer-lagging-slope-threshold",
+      &client_readers_flow_tracer_lagging_slope_threshold,
+      "-0.3",
+      validate_range<double>(-100, 100),
+      "If a reader's lag increase at at least this rate, the reader is "
+      "considered lagging (rate given as variation of time lag per time unit). "
+      "If the desired read ratio needs to be x\% of the write ratio, set this "
+      "threshold to be (1 - x / 100).",
+      CLIENT);
   init("client-test-force-stats",
        &client_test_force_stats,
        "false",
@@ -981,7 +1008,7 @@ void Settings::defineSettings(SettingEasyInit& init) {
   init(
       "client-is-log-empty-grace-period",
       &client_is_log_empty_grace_period,
-      "100ms",
+      "5s",
       validate_nonnegative<ssize_t>(),
       "After receiving responses to an isLogEmpty() request from an f-majority "
       "of nodes, wait up to this long for more nodes to chime in if there is "
@@ -1056,6 +1083,13 @@ void Settings::defineSettings(SettingEasyInit& init) {
        "When non-zero, replaces gap-grace-period for data logs.",
        SERVER | CLIENT,
        SettingsCategory::ReadPath);
+  init("metadata-log-gap-grace-period",
+       &metadata_log_gap_grace_period,
+       "0ms",
+       validate_nonnegative<ssize_t>(),
+       "When non-zero, replaces gap-grace-period for metadata logs.",
+       SERVER | CLIENT,
+       SettingsCategory::ReadPath);
   init("reader-stalled-grace-period",
        &reader_stalled_grace_period,
        "30s",
@@ -1125,6 +1159,15 @@ void Settings::defineSettings(SettingEasyInit& init) {
        "for a seal record placed by a higher-numbered sequencer. This setting "
        "sets the timeout for 'check seal' requests. The timeout is set to the "
        "smaller of this value and half the value of --seq-state-reply-timeout.",
+       SERVER,
+       SettingsCategory::Sequencer);
+  init("update-metadata-map-interval",
+       &update_metadata_map_interval,
+       "1h",
+       nullptr,
+       "Sequencer has a timer for periodically reading metadata logs and "
+       "and refreshing the in memory metadata_map_. This setting specifies "
+       "the interval for this timer",
        SERVER,
        SettingsCategory::Sequencer);
   init("delete_log_metadata_request_timeout",
@@ -1574,7 +1617,7 @@ void Settings::defineSettings(SettingEasyInit& init) {
        SettingsCategory::Configuration);
   init("use-tcp-keep-alive",
        &use_tcp_keep_alive,
-       "false",
+       "true",
        nullptr, // no validation
        "Enable TCP keepalive for all connections",
        SERVER | CLIENT,
@@ -1679,7 +1722,7 @@ void Settings::defineSettings(SettingEasyInit& init) {
        SettingsCategory::ReadPath);
   init("include-destination-on-handshake",
        &include_destination_on_handshake,
-       "false",
+       "true",
        nullptr, // no validation
        "Include the destination node ID in the LogDevice protocol handshake. "
        "If the actual node ID of the connection target does not match the "
@@ -2585,6 +2628,17 @@ void Settings::defineSettings(SettingEasyInit& init) {
        "If omitted the client timeout will be used.",
        CLIENT,
        SettingsCategory::Core);
+  init("enable-offset-map",
+       &enable_offset_map,
+       "false",
+       nullptr, // no validation
+       "Enables the server-side OffsetMap calculation feature."
+       "NOTE: There is no guarantee of byte offsets result correctness if "
+       "feature"
+       "was switched on->off->on in period shorter than retention value for"
+       "logs.",
+       SERVER,
+       SettingsCategory::WritePath);
 
   sequencer_boycotting.defineSettings(init);
 }

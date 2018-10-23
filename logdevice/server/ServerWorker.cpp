@@ -7,16 +7,17 @@
  */
 #include "ServerWorker.h"
 
-#include "logdevice/common/debug.h"
 #include "logdevice/common/PermissionChecker.h"
 #include "logdevice/common/PrincipalParser.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/server/FailureDetector.h"
-#include "logdevice/server/sequencer_boycotting/NodeStatsController.h"
-#include "logdevice/server/sequencer_boycotting/NodeStatsControllerLocator.h"
 #include "logdevice/server/ServerMessageDispatch.h"
 #include "logdevice/server/ServerProcessor.h"
 #include "logdevice/server/SettingOverrideTTLRequest.h"
 #include "logdevice/server/read_path/AllServerReadStreams.h"
+#include "logdevice/server/rebuilding/ChunkRebuilding.h"
+#include "logdevice/server/sequencer_boycotting/NodeStatsController.h"
+#include "logdevice/server/sequencer_boycotting/NodeStatsControllerLocator.h"
 #include "logdevice/server/storage/AllCachedDigests.h"
 #include "logdevice/server/storage/PurgeScheduler.h"
 #include "logdevice/server/storage/PurgeUncleanEpochs.h"
@@ -44,6 +45,7 @@ class ServerWorkerImpl {
   AllCachedDigests cachedDigests_;
   PurgeUncleanEpochsMap activePurges_;
   SettingOverrideTTLRequestMap activeSettingOverrides_;
+  ChunkRebuildingMap runningChunkRebuildings_;
 
   /**
    * Should only be instantiated on a single worker, decided by
@@ -54,7 +56,7 @@ class ServerWorkerImpl {
    * Once executed, decides if this node is a controller or not
    * have to be destructed before the node_stats_controller_
    */
-  LibeventTimer node_stats_controller_locator_timer_;
+  Timer node_stats_controller_locator_timer_;
 };
 
 ServerWorker::ServerWorker(ServerProcessor* processor,
@@ -116,6 +118,12 @@ void ServerWorker::subclassFinishWork() {
     ld_info("Aborting %lu purges", activePurges().map.size());
     activePurges().map.clearAndDispose();
   }
+
+  if (!runningChunkRebuildings().map.empty()) {
+    ld_info(
+        "Aborting %lu chunk rebuildings", runningChunkRebuildings().map.size());
+    runningChunkRebuildings().map.clear();
+  }
 }
 
 void ServerWorker::subclassWorkFinished() {
@@ -150,6 +158,10 @@ PurgeUncleanEpochsMap& ServerWorker::activePurges() const {
 
 SettingOverrideTTLRequestMap& ServerWorker::activeSettingOverrides() const {
   return impl_->activeSettingOverrides_;
+}
+
+ChunkRebuildingMap& ServerWorker::runningChunkRebuildings() const {
+  return impl_->runningChunkRebuildings_;
 }
 
 AllServerReadStreams& ServerWorker::serverReadStreams() const {
@@ -215,7 +227,6 @@ NodeStatsControllerCallback* ServerWorker::nodeStatsControllerCallback() const {
 void ServerWorker::initializeNodeStatsController() {
   impl_->node_stats_controller_ = std::make_unique<NodeStatsController>();
   impl_->node_stats_controller_locator_timer_.assign(
-      getEventBase(),
       [this, timer = &impl_->node_stats_controller_locator_timer_] {
         auto max_boycott_count =
             this->processor_->settings()

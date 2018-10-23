@@ -8,14 +8,16 @@
 
 #pragma once
 
-#include <folly/hash/Hash.h>
 #include <unordered_map>
+
+#include <folly/hash/Hash.h>
 
 #include "logdevice/common/SerializableData.h"
 
 namespace facebook { namespace logdevice {
 
-enum class CounterType : uint8_t { BYTE_OFFSET = 0 };
+// Reserve the last 10 counters for internal use
+enum class CounterType : uint8_t { BYTE_OFFSET = 246 };
 
 class OffsetMap : public SerializableData {
  public:
@@ -24,12 +26,18 @@ class OffsetMap : public SerializableData {
 
   OffsetMap();
 
+  OffsetMap(const OffsetMap& om) noexcept;
+  OffsetMap& operator=(const OffsetMap& om) noexcept;
+
+  OffsetMap(OffsetMap&& om) noexcept;
+  OffsetMap& operator=(OffsetMap&& om) noexcept;
+
   /**
    * get CounterType value from CounterTypeMap
    * @param counter_type CounterType to read
    * @return  value of CounterType
    */
-  uint64_t getCounter(const CounterType counter_type) const;
+  uint64_t getCounter(CounterType counter_type) const;
 
   /**
    * get counterTypeMap_
@@ -77,6 +85,8 @@ class OffsetMap : public SerializableData {
   const char* name() const override {
     return "OffsetMap";
   }
+
+  std::string toString() const;
 
   // Add two counterTypeMap_ and return a new OffsetMap object
   OffsetMap operator+(const OffsetMap& om) const;

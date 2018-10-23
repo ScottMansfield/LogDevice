@@ -8,7 +8,6 @@
 #include "Server.h"
 
 #include "logdevice/common/ConfigInit.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/ConstructorFailed.h"
 #include "logdevice/common/CopySetManager.h"
 #include "logdevice/common/EpochMetaDataUpdater.h"
@@ -19,18 +18,21 @@
 #include "logdevice/common/SequencerLocator.h"
 #include "logdevice/common/SequencerPlacement.h"
 #include "logdevice/common/StaticSequencerPlacement.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/ZookeeperClient.h"
 #include "logdevice/common/ZookeeperEpochStore.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/InternalLogs.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/configuration/Node.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/configuration/logs/LogsConfigManager.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/event_log/EventLogStateMachine.h"
-#include "logdevice/common/settings/SettingsUpdater.h"
+#include "logdevice/common/plugin/TraceLoggerFactory.h"
 #include "logdevice/common/settings/SSLSettingValidation.h"
+#include "logdevice/common/settings/SettingsUpdater.h"
+#include "logdevice/common/stats/PerShardHistograms.h"
 #include "logdevice/server/FailureDetector.h"
 #include "logdevice/server/IOFaultInjection.h"
 #include "logdevice/server/LazySequencerPlacement.h"
@@ -48,8 +50,6 @@
 #include "logdevice/server/storage_tasks/RecordCacheRepopulationTask.h"
 #include "logdevice/server/storage_tasks/ShardedStorageThreadPool.h"
 #include "logdevice/server/util.h"
-
-#include "logdevice/common/stats/PerShardHistograms.h"
 
 using facebook::logdevice::configuration::LocalLogsConfig;
 
@@ -215,8 +215,8 @@ ServerParameters::ServerParameters(
     UpdateableSettings<GossipSettings> gossip_settings,
     UpdateableSettings<Settings> processor_settings,
     UpdateableSettings<RocksDBSettings> rocksdb_settings,
-    std::shared_ptr<ServerPluginPack> plugin)
-    : plugin_(std::move(plugin)),
+    std::shared_ptr<PluginRegistry> plugin_registry)
+    : plugin_registry_(std::move(plugin_registry)),
       server_stats_(StatsParams().setIsServer(true)),
       settings_updater_(std::move(settings_updater)),
       server_settings_(std::move(server_settings)),
@@ -248,8 +248,12 @@ ServerParameters::ServerParameters(
 
   auto updateable_server_config = std::make_shared<UpdateableServerConfig>();
   auto updateable_logs_config = std::make_shared<UpdateableLogsConfig>();
-  updateable_config_ = std::make_shared<UpdateableConfig>(
-      updateable_server_config, updateable_logs_config);
+  auto updatable_zookeeper_config =
+      std::make_shared<UpdateableZookeeperConfig>();
+  updateable_config_ =
+      std::make_shared<UpdateableConfig>(updateable_server_config,
+                                         updateable_logs_config,
+                                         updatable_zookeeper_config);
   server_config_hook_handles_.push_back(
       updateable_server_config->addHook(std::bind(
           &ServerParameters::updateMyNodeId, this, std::placeholders::_1)));
@@ -261,6 +265,10 @@ ServerParameters::ServerParameters(
       updateable_server_config->addHook(std::bind(
           &ServerParameters::validateNodes, this, std::placeholders::_1)));
 
+  std::shared_ptr<ServerPluginPack> plugin =
+      getPluginRegistry()->getSinglePlugin<ServerPluginPack>(
+          PluginType::LEGACY_SERVER_PLUGIN);
+  ld_check(plugin);
   {
     ConfigInit config_init(
         processor_settings_->initial_config_load_timeout, getStats());
@@ -269,9 +277,9 @@ ServerParameters::ServerParameters(
     config_init.setZookeeperPollingInterval(
         processor_settings_->zk_config_polling_interval);
     int rv = config_init.attach(server_settings_->config_path,
-                                plugin_,
-                                updateable_server_config,
-                                updateable_logs_config,
+                                plugin,
+                                getPluginRegistry(),
+                                updateable_config_,
                                 nullptr,
                                 processor_settings_);
     if (rv != 0) {
@@ -302,10 +310,13 @@ ServerParameters::ServerParameters(
   }
 
   // Construct the Server Trace Logger
-  if (processor_settings_->trace_logger_disabled) {
+  std::shared_ptr<TraceLoggerFactory> trace_logger_factory =
+      plugin_registry_->getSinglePlugin<TraceLoggerFactory>(
+          PluginType::TRACE_LOGGER_FACTORY);
+  if (!trace_logger_factory || processor_settings_->trace_logger_disabled) {
     trace_logger_ = std::make_shared<NoopTraceLogger>(updateable_config_);
   } else {
-    trace_logger_ = plugin_->createTraceLogger(updateable_config_);
+    trace_logger_ = (*trace_logger_factory)(updateable_config_);
   }
 
   storage_node_ = this_node->hasRole(Configuration::NodeRole::STORAGE);
@@ -591,7 +602,9 @@ bool Server::initStore() {
 }
 
 bool Server::initProcessor() {
-  std::shared_ptr<ServerPluginPack> plugin = params_->getPlugin();
+  std::shared_ptr<ServerPluginPack> plugin =
+      params_->getPluginRegistry()->getSinglePlugin<ServerPluginPack>(
+          PluginType::LEGACY_SERVER_PLUGIN);
   ld_check(plugin);
   std::unique_ptr<SequencerLocator> sequencer_locator =
       plugin->createSequencerLocator(updateable_config_);
@@ -607,7 +620,8 @@ bool Server::initProcessor() {
                                 params_->getProcessorSettings(),
                                 params_->getStats(),
                                 std::move(sequencer_locator),
-                                params_->getPlugin(),
+                                plugin,
+                                params_->getPluginRegistry(),
                                 "",
                                 "",
                                 "ld:srv" // prefix of worker thread names
@@ -704,10 +718,10 @@ bool Server::initSequencers() {
   if (!server_settings_->epoch_store_path.empty()) {
     try {
       ld_info("Initializing FileEpochStore");
-      epoch_store.reset(
-          new FileEpochStore(server_settings_->epoch_store_path,
-                             processor_.get(),
-                             updateable_config_->updateableServerConfig()));
+      epoch_store = std::make_unique<FileEpochStore>(
+          server_settings_->epoch_store_path,
+          processor_.get(),
+          updateable_config_->updateableServerConfig());
     } catch (const ConstructorFailed&) {
       ld_error(
           "Failed to construct FileEpochStore: %s", error_description(err));
@@ -716,12 +730,13 @@ bool Server::initSequencers() {
   } else {
     ld_info("Initializing ZookeeperEpochStore");
     try {
-      epoch_store.reset(
-          new ZookeeperEpochStore(server_config_->getClusterName(),
-                                  processor_.get(),
-                                  updateable_config_->updateableServerConfig(),
-                                  processor_->updateableSettings(),
-                                  zkFactoryProd));
+      epoch_store = std::make_unique<ZookeeperEpochStore>(
+          server_config_->getClusterName(),
+          processor_.get(),
+          updateable_config_->updateableZookeeperConfig(),
+          updateable_config_->updateableServerConfig(),
+          processor_->updateableSettings(),
+          zkFactoryProd);
     } catch (const ConstructorFailed&) {
       ld_error("Failed to construct ZookeeperEpochStore: %s",
                error_description(err));

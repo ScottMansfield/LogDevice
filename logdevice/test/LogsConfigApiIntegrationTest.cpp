@@ -5,20 +5,19 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <folly/Random.h>
 #include <gtest/gtest.h>
 
+#include "logdevice/common/configuration/logs/FBuffersLogsConfigCodec.h"
+#include "logdevice/common/configuration/logs/LogsConfigDeltaTypes.h"
+#include "logdevice/common/configuration/logs/LogsConfigStateMachine.h"
+#include "logdevice/common/configuration/logs/LogsConfigTree.h"
 #include "logdevice/include/Client.h"
 #include "logdevice/include/LogAttributes.h"
 #include "logdevice/lib/ClientImpl.h"
 #include "logdevice/lib/ClientSettingsImpl.h"
-#include "logdevice/common/configuration/logs/LogsConfigTree.h"
-#include "logdevice/common/configuration/logs/FBuffersLogsConfigCodec.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
-#include "logdevice/common/configuration/logs/LogsConfigDeltaTypes.h"
 #include "logdevice/test/utils/IntegrationTestUtils.h"
-#include "logdevice/common/configuration/logs/LogsConfigStateMachine.h"
-
-#include <folly/Random.h>
 
 using namespace facebook::logdevice;
 using namespace facebook::logdevice::logsconfig;
@@ -793,6 +792,6 @@ TEST_F(LogsConfigIntegrationTest, SetAttributesLogGroupClash) {
 
   for (int node_index = 0; node_index < node_count; ++node_index) {
     IntegrationTestUtils::Node& node = cluster->getNode(node_index);
-    ASSERT(node.isRunning());
+    ASSERT_TRUE(node.isRunning());
   }
 }

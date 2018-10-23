@@ -99,9 +99,6 @@ class LocalLogsConfig : public LogsConfig {
     return copyLocal();
   }
 
-  // get raw pointer into the struct that LocalLogsConfig owns
-  const LogGroupNode* getLogGroupByIDRaw(logid_t id) const;
-
   const LogGroupInDirectory* getLogGroupInDirectoryByIDRaw(logid_t id) const;
 
   folly::Optional<std::string> getLogGroupPath(logid_t id) const;
@@ -114,6 +111,10 @@ class LocalLogsConfig : public LogsConfig {
     internal_logs_ = internal_logs;
     // invalidate the narrowest replication cache
     narrowest_replication_cache_.clear();
+  }
+
+  const InternalLogs& getInternalLogs() const {
+    return internal_logs_;
   }
 
   LocalLogsConfigIterator logsBegin() const {

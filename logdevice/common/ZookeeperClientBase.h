@@ -7,19 +7,19 @@
  */
 #pragma once
 
-#include <boost/noncopyable.hpp>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
+#include <boost/noncopyable.hpp>
 #include <folly/Function.h>
 #include <zookeeper/zookeeper.h>
 
-#include "logdevice/common/debug.h"
-#include "logdevice/common/configuration/ServerConfig.h"
 #include "logdevice/common/UpdateableSharedPtr.h"
+#include "logdevice/common/configuration/ZookeeperConfig.h"
+#include "logdevice/common/debug.h"
 
 namespace facebook { namespace logdevice {
 
@@ -184,10 +184,10 @@ class ZookeeperClientBase : boost::noncopyable {
   virtual int multiOp(std::vector<zk::Op> ops, multi_op_callback_t cb) = 0;
 };
 
-// Factory type used to create ZookeeperClient instances utilizing ServerConfig
-// Decouples creation from usage, so gives possibility to
+// Factory type used to create ZookeeperClient instances utilizing
+// ZookeeperConfig. Decouples creation from usage, so gives possibility to
 // use mock object in testing or easily switch implementations
 using ZKFactory = std::function<std::unique_ptr<ZookeeperClientBase>(
-    const ServerConfig& config)>;
+    const facebook::logdevice::configuration::ZookeeperConfig& config)>;
 
 }} // namespace facebook::logdevice

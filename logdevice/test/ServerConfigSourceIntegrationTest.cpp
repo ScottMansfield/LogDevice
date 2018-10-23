@@ -10,13 +10,14 @@
 
 #include <gtest/gtest.h>
 
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/Processor.h"
-#include "logdevice/common/settings/Settings.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/settings/Settings.h"
+#include "logdevice/lib/ClientBuiltinPluginProvider.h"
 #include "logdevice/lib/ClientImpl.h"
-#include "logdevice/lib/ClientSettingsImpl.h"
 #include "logdevice/lib/ClientPluginPack.h"
+#include "logdevice/lib/ClientSettingsImpl.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
 #include "logdevice/test/utils/IntegrationTestUtils.h"
 
@@ -39,10 +40,10 @@ TEST_F(ServerConfigSourceIntegrationTest, Basic) {
 
   std::string config_path = "server:";
   auto nodes = new_server_config->getNodes();
-  for (node_index_t index = 0; index < nodes.size(); index++) {
+  for (node_index_t index = nodes.size() - 1; index >= 0; index--) {
     auto& node = nodes.at(index);
     config_path += node.address.toString();
-    if (index < nodes.size() - 1) {
+    if (index != 0) {
       config_path += ',';
       // Kill all but the last node in the list
       cluster->getNode(index).kill();
@@ -91,7 +92,9 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromClient) {
       std::make_shared<UpdateableConfig>(
           std::make_shared<UpdateableServerConfig>(
               cluster_config->serverConfig()->copy()),
-          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()));
+          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()),
+          std::make_shared<UpdateableZookeeperConfig>(
+              cluster_config->zookeeperConfig()));
   // Set the client config version to 2, so it's higher than the cluster's
   client_config->get()->serverConfig()->setVersion(config_version_t(2));
   // Pretend this config is from the server
@@ -107,6 +110,8 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromClient) {
 
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-config-synchronization", true));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -114,7 +119,7 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromClient) {
       "",
       std::chrono::seconds(1),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   // Make an appendSync() call. The server config should detect that its config
@@ -162,7 +167,9 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromSource) {
       std::make_shared<UpdateableConfig>(
           std::make_shared<UpdateableServerConfig>(
               cluster_config->serverConfig()->copy()),
-          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()));
+          std::make_shared<UpdateableLogsConfig>(cluster_config->logsConfig()),
+          std::make_shared<UpdateableZookeeperConfig>(
+              cluster_config->zookeeperConfig()));
   // Set the client config version to 2, so it's higher than the cluster's
   client_config->get()->serverConfig()->setVersion(config_version_t(2));
 
@@ -176,6 +183,8 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromSource) {
 
   std::unique_ptr<ClientSettings> client_settings(ClientSettings::create());
   ASSERT_EQ(0, client_settings->set("enable-config-synchronization", true));
+  auto plugin_registry =
+      std::make_shared<PluginRegistry>(getClientPluginProviders());
   std::shared_ptr<Client> client = std::make_shared<ClientImpl>(
       client_config->get()->serverConfig()->getClusterName(),
       client_config,
@@ -183,7 +192,7 @@ TEST_F(ServerConfigSourceIntegrationTest, StaleServerConfigFetchFromSource) {
       "",
       std::chrono::seconds(1),
       std::move(client_settings),
-      load_client_plugin());
+      plugin_registry);
   ASSERT_TRUE((bool)client);
 
   // Make an appendSync() call. The server config should detect that its config

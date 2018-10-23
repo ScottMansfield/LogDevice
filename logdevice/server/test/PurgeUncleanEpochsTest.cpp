@@ -5,13 +5,16 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <folly/Memory.h>
-#include <folly/Optional.h>
-#include <gtest/gtest.h>
+#include "logdevice/server/storage/PurgeUncleanEpochs.h"
+
 #include <memory>
 #include <vector>
 
-#include "logdevice/common/LibeventTimer.h"
+#include <folly/Memory.h>
+#include <folly/Optional.h>
+#include <gtest/gtest.h>
+
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
@@ -20,7 +23,6 @@
 #include "logdevice/server/locallogstore/test/StoreUtil.h"
 #include "logdevice/server/locallogstore/test/TemporaryLogStore.h"
 #include "logdevice/server/storage/PurgeSingleEpoch.h"
-#include "logdevice/server/storage/PurgeUncleanEpochs.h"
 
 #define N0 ShardID(0, 0)
 
@@ -221,9 +223,9 @@ void PurgeUncleanEpochsTest::setUp() {
       createMetaDataLogsConfig(nodes_config, nodes_config.getNodes().size(), 1);
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("purge_unclean_epochs_test",
-                             std::move(nodes_config),
-                             std::move(meta_config)),
+      ServerConfig::fromDataTest("purge_unclean_epochs_test",
+                                 std::move(nodes_config),
+                                 std::move(meta_config)),
       std::move(logs_config));
 
   if (test_metadata_log_) {

@@ -5,6 +5,8 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/protocol/APPEND_Message.h"
+
 #include <folly/Memory.h>
 #include <folly/Optional.h>
 #include <gtest/gtest.h>
@@ -21,7 +23,6 @@
 #include "logdevice/common/Sequencer.h"
 #include "logdevice/common/SequencerLocator.h"
 #include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/protocol/APPEND_Message.h"
 #include "logdevice/common/test/TestUtil.h"
 
 namespace facebook { namespace logdevice {
@@ -78,6 +79,8 @@ class MockSequencer : public Sequencer {
 
   void startPeriodicReleasesBroadcast() override {}
 
+  void getHistoricalMetaData(GetHistoricalMetaDataMode /* unused */) override {}
+
  private:
   APPEND_MessageTest* const test_;
 };
@@ -110,7 +113,7 @@ class APPEND_MessageTest : public ::testing::Test {
     ml_config.sequencers_provision_epoch_store = false;
     ml_config.sequencers_write_metadata_logs = false;
     config_ = std::make_shared<Configuration>(
-        ServerConfig::fromData(__FILE__, nodes, std::move(ml_config)),
+        ServerConfig::fromDataTest(__FILE__, nodes, std::move(ml_config)),
         std::move(logs_config));
 
     settings_.write_sticky_copysets = true;

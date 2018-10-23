@@ -11,9 +11,10 @@
 #include <type_traits>
 #include <vector>
 
+#include "logdevice/common/SerializableData.h"
 #include "logdevice/common/debug.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/protocol/MessageType.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 
 struct evbuffer;
@@ -77,12 +78,6 @@ class ProtocolWriter {
      * @return    compute checksum of payload held in the Destination buffer.
      */
     virtual uint64_t computeChecksum() = 0;
-
-    /**
-     * Moves the temp evbuffer contents into Destination evbuffer.
-     * Frees the temp evbuffer.
-     */
-    virtual void endSerialization() {}
 
     virtual ~Destination() {}
   };
@@ -155,6 +150,22 @@ class ProtocolWriter {
   }
 
   /**
+   * Writes a vector of SerializableData.
+   *
+   * NOTE: The length of the vector is not included, assumed to be known to
+   * the reader (from a header field for example).
+   */
+  template <typename Vector>
+  void writeVectorOfSerializable(const Vector& v) {
+    if (proto_ < proto_gate_) {
+      return;
+    }
+    for (const auto& e : v) {
+      e.serialize(*this);
+    }
+  }
+
+  /**
    * Writes a vector prefixed by its size.
    */
   template <typename Vector>
@@ -216,9 +227,6 @@ class ProtocolWriter {
   }
   uint64_t computeChecksum() {
     return dest_->computeChecksum();
-  }
-  void endSerialization() {
-    dest_->endSerialization();
   }
 
   ProtocolWriter(std::unique_ptr<Destination> dest,

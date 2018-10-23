@@ -7,25 +7,25 @@
  */
 #include "STORE_Message.h"
 
-#include <unistd.h>
-
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <unistd.h>
 #include <vector>
 
 #include <folly/Memory.h>
+
 #include "logdevice/common/Appender.h"
 #include "logdevice/common/EpochRecovery.h"
 #include "logdevice/common/RebuildingTypes.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/MUTATED_Message.h"
 #include "logdevice/common/protocol/ProtocolReader.h"
 #include "logdevice/common/protocol/ProtocolWriter.h"
 #include "logdevice/common/protocol/STORED_Message.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/util.h"
 
@@ -136,9 +136,7 @@ void STORE_Message::serialize(ProtocolWriter& writer) const {
   if (header_.flags & STORE_Header::REBUILDING) {
     writer.write(extra_.rebuilding_version);
     writer.write(extra_.rebuilding_wave);
-    if (proto >= Compatibility::REBUILDING_WITHOUT_WAL_2) {
-      writer.write(extra_.rebuilding_id);
-    }
+    writer.write(extra_.rebuilding_id);
   }
 
   if (header_.flags & STORE_Header::OFFSET_WITHIN_EPOCH) {
@@ -154,9 +152,7 @@ void STORE_Message::serialize(ProtocolWriter& writer) const {
     writer.write(extra_.first_amendable_offset);
   }
 
-  // All servers should have been upgraded to a recent enough protocol version.
   writer.writeVector(copyset_);
-  ld_check(writer.proto() >= Compatibility::SHARD_ID_IN_STORE_MSG);
   ld_check(header_.copyset_size == copyset_.size());
 
   if (header_.flags & STORE_Header::STICKY_COPYSET) {
@@ -164,26 +160,17 @@ void STORE_Message::serialize(ProtocolWriter& writer) const {
   }
 
   if (header_.flags & STORE_Header::CUSTOM_KEY) {
-    if (proto < Compatibility::APPEND_WITH_OPTIONAL_KEYS) {
-      const auto it = optional_keys_.find(KeyType::FINDKEY);
-      ld_check(it != optional_keys_.end() &&
-               it->second.size() <= std::numeric_limits<uint16_t>::max());
-      uint16_t key_length = it->second.length();
-      writer.write(key_length);
-      writer.writeVector(it->second);
-    } else {
-      // Replacing it with write/readLengthPrefixedVector breaks existing
-      // MessageSerializationTest test infrastructure.
-      uint8_t optional_keys_length = optional_keys_.size();
-      writer.write(optional_keys_length);
-      for (const auto& key_pair : optional_keys_) {
-        uint8_t type = static_cast<uint8_t>(key_pair.first);
-        ld_check(type <= std::numeric_limits<uint8_t>::max());
-        writer.write(type);
-        uint16_t length = key_pair.second.size();
-        writer.write(length);
-        writer.writeVector(key_pair.second);
-      }
+    // Replacing it with write/readLengthPrefixedVector breaks existing
+    // MessageSerializationTest test infrastructure.
+    uint8_t optional_keys_length = optional_keys_.size();
+    writer.write(optional_keys_length);
+    for (const auto& key_pair : optional_keys_) {
+      uint8_t type = static_cast<uint8_t>(key_pair.first);
+      ld_check(type <= std::numeric_limits<uint8_t>::max());
+      writer.write(type);
+      uint16_t length = key_pair.second.size();
+      writer.write(length);
+      writer.writeVector(key_pair.second);
     }
   }
 
@@ -223,9 +210,7 @@ MessageReadResult STORE_Message::deserialize(ProtocolReader& reader,
   if (hdr.flags & STORE_Header::REBUILDING) {
     reader.read(&extra.rebuilding_version);
     reader.read(&extra.rebuilding_wave);
-    if (proto >= Compatibility::REBUILDING_WITHOUT_WAL_2) {
-      reader.read(&extra.rebuilding_id);
-    }
+    reader.read(&extra.rebuilding_id);
   }
 
   if (hdr.flags & STORE_Header::OFFSET_WITHIN_EPOCH) {
@@ -265,30 +250,20 @@ MessageReadResult STORE_Message::deserialize(ProtocolReader& reader,
   }
 
   if (hdr.flags & STORE_Header::CUSTOM_KEY) {
-    if (reader.proto() < Compatibility::APPEND_WITH_OPTIONAL_KEYS) {
+    uint8_t optional_keys_length;
+    reader.read(&optional_keys_length);
+    for (uint8_t i = 0; i < optional_keys_length; ++i) {
+      if (!reader.ok()) {
+        break;
+      }
+      uint8_t type;
+      std::string str;
       uint16_t length;
+      reader.read(&type);
       reader.read(&length);
-      if (reader.ok()) {
-        std::string str;
-        reader.readVector(&str, length);
-        optional_keys.insert(std::make_pair(KeyType::FINDKEY, str));
-      }
-    } else {
-      uint8_t optional_keys_length;
-      reader.read(&optional_keys_length);
-      for (uint8_t i = 0; i < optional_keys_length; ++i) {
-        if (!reader.ok()) {
-          break;
-        }
-        uint8_t type;
-        std::string str;
-        uint16_t length;
-        reader.read(&type);
-        reader.read(&length);
-        reader.readVector(&str, length);
-        auto keytype = static_cast<KeyType>(type);
-        optional_keys.insert(std::make_pair(keytype, str));
-      }
+      reader.readVector(&str, length);
+      auto keytype = static_cast<KeyType>(type);
+      optional_keys.insert(std::make_pair(keytype, str));
     }
   }
 

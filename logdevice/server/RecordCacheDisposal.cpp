@@ -8,9 +8,9 @@
 #include "RecordCacheDisposal.h"
 
 #include "logdevice/common/MetaDataLog.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/ZeroCopiedRecordDisposal.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/server/EpochRecordCache.h"
 #include "logdevice/server/ServerProcessor.h"
@@ -101,7 +101,7 @@ size_t RecordCacheDisposal::getEpochRecordCacheSize(logid_t logid) const {
   }
 
   auto config = processor_->config_->get();
-  const auto* log = config->getLogGroupByIDRaw(logid);
+  const auto log = config->getLogGroupByIDShared(logid);
   if (log == nullptr) {
     // log does not exist in config, use default fallback value
     return 256;
@@ -121,7 +121,7 @@ bool RecordCacheDisposal::tailOptimized(logid_t logid) const {
     return true;
   }
   auto config = processor_->config_->get();
-  const auto* log = config->getLogGroupByIDRaw(logid);
+  const auto log = config->getLogGroupByIDShared(logid);
   if (log == nullptr) {
     return false;
   }

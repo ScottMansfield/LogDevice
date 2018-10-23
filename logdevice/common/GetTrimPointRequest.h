@@ -8,10 +8,10 @@
 
 #pragma once
 
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/RequestType.h"
+#include "logdevice/common/Timer.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/protocol/GET_TRIM_POINT_Message.h"
 #include "logdevice/common/protocol/GET_TRIM_POINT_REPLY_Message.h"
 #include "logdevice/include/types.h"
@@ -71,7 +71,7 @@ class GetTrimPointRequest : public Request {
  private:
   const logid_t log_id_;
   const std::chrono::milliseconds request_interval_;
-  std::unique_ptr<LibeventTimer> request_timer_;
+  std::unique_ptr<Timer> request_timer_;
 
  protected:
   /**

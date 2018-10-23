@@ -9,9 +9,8 @@
 
 #include "folly/dynamic.h"
 #include "folly/json.h"
-
-#include "logdevice/lib/ClientImpl.h"
 #include "logdevice/common/stats/Stats.h"
+#include "logdevice/lib/ClientImpl.h"
 #include "logdevice/test/utils/IntegrationTestBase.h"
 #include "logdevice/test/utils/IntegrationTestUtils.h"
 
@@ -264,17 +263,16 @@ class NodeStatsControllerIntegrationTest
       new_settings[kv.first] = kv.second;
     }
 
-    std::shared_ptr<ServerConfig> new_config =
-        ServerConfig::fromData(other->getClusterName(),
-                               configuration::NodesConfig(other->getNodes()),
-                               other->getMetaDataLogsConfig(),
-                               ServerConfig::PrincipalsConfig(),
-                               ServerConfig::SecurityConfig(),
-                               ServerConfig::TraceLoggerConfig(),
-                               ServerConfig::TrafficShapingConfig(),
-                               ServerConfig::ZookeeperConfig(),
-                               new_settings,
-                               other->getClientSettingsConfig());
+    std::shared_ptr<ServerConfig> new_config = ServerConfig::fromDataTest(
+        other->getClusterName(),
+        configuration::NodesConfig(other->getNodes()),
+        other->getMetaDataLogsConfig(),
+        ServerConfig::PrincipalsConfig(),
+        ServerConfig::SecurityConfig(),
+        ServerConfig::TraceLoggerConfig(),
+        ServerConfig::TrafficShapingConfig(),
+        new_settings,
+        other->getClientSettingsConfig());
 
     ASSERT_TRUE(new_config != nullptr) << "Invalid setting given";
 

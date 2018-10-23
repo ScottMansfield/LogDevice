@@ -5,18 +5,17 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
-
 #include <cstdio>
 #include <cstring>
 #include <memory>
 
-#include "logdevice/include/Record.h"
+#include <gtest/gtest.h>
 
 #include "logdevice/common/EpochStoreEpochMetaDataFormat.h"
 #include "logdevice/common/EpochStoreLastCleanEpochFormat.h"
 #include "logdevice/common/LastCleanEpochZRQ.h"
 #include "logdevice/common/TailRecord.h"
+#include "logdevice/include/Record.h"
 
 namespace {
 
@@ -123,6 +122,7 @@ TEST_F(LastCleanEpochStoreFormatTest, ParsingCurrentFormat) {
       // represent a empty log
       tail.header.log_id = LOGID;
       tail.header.u.byte_offset = 0;
+      tail.offsets_map_.setCounter(CounterType::BYTE_OFFSET, 0);
     }
     ld_check(tail.isValid());
 
@@ -135,12 +135,10 @@ TEST_F(LastCleanEpochStoreFormatTest, ParsingCurrentFormat) {
     ASSERT_GT(written, 0);
     ASSERT_EQ(expected_size, written);
     ASSERT_LE(written, sizeof(zbuf));
-
     epoch_t parsed_epoch;
     TailRecord parsed_tail;
     int rv = EpochStoreLastCleanEpochFormat::fromLinearBuffer(
         zbuf, written, LOGID, &parsed_epoch, &parsed_tail);
-
     ASSERT_EQ(0, rv);
     ASSERT_EQ(lce, parsed_epoch);
     ASSERT_TRUE(parsed_tail.isValid());

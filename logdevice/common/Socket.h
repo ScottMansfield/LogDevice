@@ -22,7 +22,6 @@
 #include "event2/event_struct.h"
 #include "logdevice/common/Address.h"
 #include "logdevice/common/AdminCommandTable-fwd.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/ConnectThrottle.h"
 #include "logdevice/common/CostQueue.h"
 #include "logdevice/common/Envelope.h"
@@ -31,10 +30,11 @@
 #include "logdevice/common/ResourceBudget.h"
 #include "logdevice/common/RunState.h"
 #include "logdevice/common/SecurityInformation.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/Sockaddr.h"
 #include "logdevice/common/Socket-fwd.h"
 #include "logdevice/common/WeakRefHolder.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/settings/Settings.h"
 
 namespace facebook { namespace logdevice {
 
@@ -185,6 +185,13 @@ class Socket {
 
   Sockaddr peerSockaddr() const {
     return peer_sockaddr_;
+  }
+
+  /**
+   * For Testing only!
+   */
+  void enableChecksumTampering(bool enable) {
+    tamper_ = enable;
   }
 
   // LogDevice-level address of peer end-point at the other end of the
@@ -559,6 +566,24 @@ class Socket {
    *         failure and err is set to E::INTERNAL.
    */
   int serializeMessage(std::unique_ptr<Envelope>&& msg, size_t msglen);
+
+  /**
+   * Helper functions to split serializeMessage() functionality.
+   * This will be used when:
+   * - SSL is enabled
+   * - checksumming is disabled
+   * - Message Type is ACK/HELLO
+   * @return 0 for success, -1 for failure
+   */
+  int serializeMessageWithoutChecksum(const Message& msg,
+                                      size_t msglen,
+                                      struct evbuffer* outbuf);
+  /**
+   * @return 0 for success, -1 for failure
+   */
+  int serializeMessageWithChecksum(const Message& msg,
+                                   size_t msglen,
+                                   struct evbuffer* outbuf);
 
   /**
    * Allow the async message error simulator to optionally take ownership of
@@ -1035,6 +1060,15 @@ class Socket {
    * where the file descriptor is not known (e.g., before connecting).
    */
   int fd_;
+
+  /**
+   * For Testing only!
+   */
+  bool shouldTamperChecksum() {
+    return tamper_;
+  }
+
+  bool tamper_{false};
 
   friend class SocketTest;
   friend class ClientSocketTest;

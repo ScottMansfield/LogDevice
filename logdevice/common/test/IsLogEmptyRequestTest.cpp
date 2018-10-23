@@ -5,18 +5,19 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/IsLogEmptyRequest.h"
+
 #include <functional>
-#include <gtest/gtest.h>
 
 #include <folly/Memory.h>
-#include "logdevice/common/IsLogEmptyRequest.h"
-#include "logdevice/common/test/TestUtil.h"
+#include <gtest/gtest.h>
+
 #include "logdevice/common/debug.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
 #include "logdevice/common/test/MockNodeSetAccessor.h"
 #include "logdevice/common/test/MockNodeSetFinder.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
-
+#include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/NodeLocationScope.h"
 #include "logdevice/include/types.h"
 
@@ -81,7 +82,7 @@ class MockIsLogEmptyRequest : public IsLogEmptyRequest {
                                  nodes_config.getNodes().size(),
                                  replication.getReplicationFactor());
 
-    config_ = ServerConfig::fromData(
+    config_ = ServerConfig::fromDataTest(
         __FILE__, std::move(nodes_config), std::move(meta_config));
 
     storage_set_.reserve(storage_set_size);
@@ -1226,27 +1227,27 @@ TEST(IsLogEmptyRequestTest, AuthEmptyThenPermanentError) {
 // Make sure wave timeout choice works as intended
 TEST(IsLogEmptyRequestTest, WaveTimeoutInterval) {
   static_assert(IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MIN == 500 &&
-                IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MAX == 1500,
+                    IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MAX == 1500,
                 "Range to which we clamp wave timeouts changed, please update "
                 "tests accordingly.");
 
   // Short timeout -- should hit the minimum
   auto interval = MockIsLogEmptyRequest::getWaveTimeoutInterval(
-    std::chrono::milliseconds(5000));
-  ASSERT_EQ(interval.lo.count(),
-            IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MIN);
+      std::chrono::milliseconds(5000));
+  ASSERT_EQ(
+      interval.lo.count(), IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MIN);
   ASSERT_EQ(interval.hi.count(), 10000);
 
   // Long timeout -- should hit the maximum
   interval = MockIsLogEmptyRequest::getWaveTimeoutInterval(
-    std::chrono::milliseconds(15000));
-  ASSERT_EQ(interval.lo.count(),
-            IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MAX);
+      std::chrono::milliseconds(15000));
+  ASSERT_EQ(
+      interval.lo.count(), IsLogEmptyRequest::WAVE_TIMEOUT_LOWER_BOUND_MAX);
   ASSERT_EQ(interval.hi.count(), 10000);
 
   // This should give us a lower bound of 1000ms
   interval = MockIsLogEmptyRequest::getWaveTimeoutInterval(
-    std::chrono::milliseconds(10000));
+      std::chrono::milliseconds(10000));
   ASSERT_EQ(interval.lo.count(), 1000);
   ASSERT_EQ(interval.hi.count(), 10000);
 }

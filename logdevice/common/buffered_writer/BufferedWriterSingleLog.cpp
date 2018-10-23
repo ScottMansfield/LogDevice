@@ -11,6 +11,7 @@
 #include <lz4.h>
 #include <lz4hc.h>
 #include <zstd.h>
+
 #include <folly/IntrusiveList.h>
 #include <folly/Memory.h>
 #include <folly/Random.h>
@@ -19,14 +20,14 @@
 
 #include "logdevice/common/AppendRequest.h"
 #include "logdevice/common/Checksum.h"
-#include "logdevice/common/debug.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/SimpleEnumMap.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/buffered_writer/BufferedWriteDecoderImpl.h"
 #include "logdevice/common/buffered_writer/BufferedWriterImpl.h"
 #include "logdevice/common/buffered_writer/BufferedWriterShard.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/stats/Stats.h"
 
 namespace facebook { namespace logdevice {
@@ -221,10 +222,10 @@ void BufferedWriterSingleLog::flush() {
   // Parent shouldn't have called us from flushAll() if we're not flushable,
   // internal methods ensure we're flushable
   ld_check(isFlushable());
-  // Should cease being flushable after this method has finished, make sure to
-  // let parent know
+  // Make sure to let parent know whether this log is flushable or not. It could
+  // still be flushable if we flushed a batch (e.g. because of reaching the size
+  // threshold) and have blocked appenders that are not deferred.
   SCOPE_EXIT {
-    ld_check(!isFlushable());
     parent_->setFlushable(*this, isFlushable());
   };
 
@@ -448,7 +449,9 @@ void BufferedWriterSingleLog::unblockAppends() {
   }
   blocked_appends_.compact();
 
-  if (flush_at_end) {
+  // Despite `flush_at_end == true`, the log may not be flushable if the last
+  // call to `appendImpl()` above has flushed the last batch
+  if (flush_at_end && isFlushable()) {
     flush();
   }
 }
@@ -481,12 +484,11 @@ void BufferedWriterSingleLog::activateTimeTrigger() {
 
   Worker* w = Worker::onThisThread();
   if (!time_trigger_timer_) {
-    time_trigger_timer_ =
-        std::make_unique<LibeventTimer>(w->getEventBase(), [this] {
-          StatsHolder* stats{parent_->parent_->processor()->stats_};
-          STAT_INCR(stats, buffered_writer_time_trigger_flush);
-          flush();
-        });
+    time_trigger_timer_ = std::make_unique<Timer>([this] {
+      StatsHolder* stats{parent_->parent_->processor()->stats_};
+      STAT_INCR(stats, buffered_writer_time_trigger_flush);
+      flush();
+    });
   }
   if (!time_trigger_timer_->isActive()) {
     time_trigger_timer_->activate(options.time_trigger, &w->commonTimeouts());
@@ -514,8 +516,6 @@ int BufferedWriterSingleLog::scheduleRetry(Batch& batch,
     return -1;
   }
 
-  Worker* w = Worker::onThisThread();
-
   // Initialize `retry_timer' if this is the first retry
   if (!batch.retry_timer) {
     ld_check(options.retry_initial_delay.count() >= 0);
@@ -525,7 +525,6 @@ int BufferedWriterSingleLog::scheduleRetry(Batch& batch,
     max_delay = std::max(max_delay, options.retry_initial_delay);
 
     batch.retry_timer = std::make_unique<ExponentialBackoffTimer>(
-        w->getEventBase(),
         [this, &batch]() { sendBatch(batch); },
         options.retry_initial_delay,
         max_delay);

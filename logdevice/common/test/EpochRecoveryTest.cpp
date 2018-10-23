@@ -5,21 +5,22 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <algorithm>
-#include <gtest/gtest.h>
-
 #include "logdevice/common/EpochRecovery.h"
+
+#include <algorithm>
+
+#include <gtest/gtest.h>
 
 #include "logdevice/common/DataRecordOwnsPayload.h"
 #include "logdevice/common/Mutator.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/protocol/GAP_Message.h"
 #include "logdevice/common/protocol/MUTATED_Message.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/ServerHistograms.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/test/DigestTestUtil.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
-#include "logdevice/common/test/MockLibeventTimer.h"
+#include "logdevice/common/test/MockTimer.h"
 #include "logdevice/common/test/TestUtil.h"
 
 #define N0 ShardID(0, 0)
@@ -219,9 +220,8 @@ class MockEpochRecoveryDependencies : public EpochRecoveryDependencies {
     return std::move(timer);
   }
 
-  std::unique_ptr<LibeventTimer>
-  createLibeventTimer(std::function<void()> cb) override {
-    auto timer = std::make_unique<MockLibeventTimer>();
+  std::unique_ptr<Timer> createTimer(std::function<void()> cb) override {
+    auto timer = std::make_unique<MockTimer>();
     timer->setCallback(std::move(cb));
     return std::move(timer);
   }
@@ -323,7 +323,7 @@ void EpochRecoveryTest::initConfig() {
       createMetaDataLogsConfig(nodes_config, nodes_config.getNodes().size(), 3);
 
   updateable_config_->updateableServerConfig()->update(
-      ServerConfig::fromData(__FILE__, nodes_config, meta_config));
+      ServerConfig::fromDataTest(__FILE__, nodes_config, meta_config));
   updateable_config_->updateableLogsConfig()->update(std::move(logs_config));
 }
 
@@ -487,7 +487,7 @@ TEST_F(EpochRecoveryTest, Basic) {
   // started
   ASSERT_TRUE(erm_->getGracePeriodTimer()->isActive());
   checkRecoveryState(ERMState::DIGEST);
-  static_cast<MockLibeventTimer*>(erm_->getGracePeriodTimer())->trigger();
+  static_cast<MockTimer*>(erm_->getGracePeriodTimer())->trigger();
 
   // begin mutation once grace period expires
   checkRecoveryState(ERMState::MUTATION);
@@ -573,7 +573,7 @@ TEST_F(EpochRecoveryTest, RestartWhenAuthoritativeStatusChanges) {
   ASSERT_NODE_STATE(NState::MUTATABLE, N1, N2);
   ASSERT_NODE_STATE(NState::SEALING, N3);
   ASSERT_TRUE(erm_->getGracePeriodTimer()->isActive());
-  static_cast<MockLibeventTimer*>(erm_->getGracePeriodTimer())->trigger();
+  static_cast<MockTimer*>(erm_->getGracePeriodTimer())->trigger();
   checkRecoveryState(ERMState::MUTATION);
   // mutator is done
   erm_->onMutationComplete(esn_t(2), E::OK, ShardID());
@@ -644,7 +644,7 @@ TEST_F(EpochRecoveryTest, UnexpectedHolePlugBelowLNG) {
   ASSERT_NODE_STATE(NState::MUTATABLE, N1, N2);
   ASSERT_NODE_STATE(NState::SEALING, N3);
   ASSERT_TRUE(erm_->getGracePeriodTimer()->isActive());
-  static_cast<MockLibeventTimer*>(erm_->getGracePeriodTimer())->trigger();
+  static_cast<MockTimer*>(erm_->getGracePeriodTimer())->trigger();
   checkRecoveryState(ERMState::MUTATION);
   // mutator is done
   erm_->onMutationComplete(esn_t(2), E::OK, ShardID());

@@ -5,18 +5,20 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/GetHeadAttributesRequest.h"
+
 #include <functional>
-#include <gtest/gtest.h>
 
 #include <folly/Memory.h>
-#include "logdevice/common/GetHeadAttributesRequest.h"
-#include "logdevice/common/test/TestUtil.h"
-#include "logdevice/include/types.h"
-#include "logdevice/common/types_internal.h"
+#include <gtest/gtest.h>
+
 #include "logdevice/common/debug.h"
-#include "logdevice/common/test/MockSequencerRouter.h"
 #include "logdevice/common/test/MockNodeSetAccessor.h"
 #include "logdevice/common/test/MockNodeSetFinder.h"
+#include "logdevice/common/test/MockSequencerRouter.h"
+#include "logdevice/common/test/TestUtil.h"
+#include "logdevice/common/types_internal.h"
+#include "logdevice/include/types.h"
 
 using namespace facebook::logdevice;
 
@@ -63,7 +65,7 @@ class MockGetHeadAttributesRequest : public GetHeadAttributesRequest {
                                  nodes_config.getNodes().size(),
                                  replication.getReplicationFactor());
 
-    config_ = ServerConfig::fromData(
+    config_ = ServerConfig::fromDataTest(
         __FILE__, std::move(nodes_config), std::move(meta_config));
 
     storage_set_.reserve(storage_set_size);

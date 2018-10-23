@@ -10,21 +10,22 @@
 #include <atomic>
 #include <memory>
 #include <unordered_set>
-#include <boost/multi_index_container.hpp>
+
 #include <boost/multi_index/indexed_by.hpp>
-#include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index/member.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index_container.hpp>
 
 #include "logdevice/common/BackoffTimer.h"
 #include "logdevice/common/ClusterState.h"
-#include "logdevice/common/event_log/EventLogStateMachine.h"
-#include "logdevice/common/event_log/EventLogWriter.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeID.h"
-#include "logdevice/common/settings/RebuildingSettings.h"
-#include "logdevice/common/settings/UpdateableSettings.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Timestamp.h"
 #include "logdevice/common/WeakRefHolder.h"
+#include "logdevice/common/event_log/EventLogStateMachine.h"
+#include "logdevice/common/event_log/EventLogWriter.h"
+#include "logdevice/common/settings/RebuildingSettings.h"
+#include "logdevice/common/settings/UpdateableSettings.h"
 
 /**
  * @file RebuildingSupervisor is in charge of triggering rebuilding (writing
@@ -301,7 +302,7 @@ class RebuildingSupervisor {
   State state_{IDLE};
 
   // main timer. fires when the next rebuilding trigger is due for execution.
-  LibeventTimer rebuilding_timer_;
+  Timer rebuilding_timer_;
   // retry timer. used when writing to the event log failed.
   ExponentialBackoffTimer retry_timer_;
 

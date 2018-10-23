@@ -13,18 +13,17 @@
 #include <set>
 
 #include <boost/noncopyable.hpp>
-
 #include <folly/Optional.h>
 
 #include "logdevice/common/AdminCommandTable-fwd.h"
 #include "logdevice/common/DataRecordOwnsPayload.h"
 #include "logdevice/common/FailureDomainNodeSet.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/MetaDataLogReader.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/NodeSetFinder.h"
 #include "logdevice/common/ReadStreamAttributes.h"
 #include "logdevice/common/ShardID.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/client_read_stream/ClientReadStreamSenderState.h"
 #include "logdevice/common/protocol/GAP_Message.h"
 #include "logdevice/common/protocol/START_Message.h"
@@ -269,9 +268,9 @@ class ClientReadStreamDependencies {
                                   std::chrono::milliseconds initial_delay,
                                   std::chrono::milliseconds max_delay);
 
-  // Utility method to create a LibeventTimer.
-  virtual std::unique_ptr<LibeventTimer>
-  createLibeventTimer(std::function<void()> cb = nullptr);
+  // Utility method to create a Timer.
+  virtual std::unique_ptr<Timer>
+  createTimer(std::function<void()> cb = nullptr);
 
   /**
    * Returns the callback that resolves a ClientReadStream id to an instance
@@ -319,8 +318,6 @@ class ClientReadStreamDependencies {
 
   virtual TimeoutMap* getCommonTimeouts();
 
-  virtual const struct timeval* getZeroTimeout();
-
  private:
   read_stream_id_t read_stream_id_;
   logid_t log_id_;
@@ -344,7 +341,7 @@ class ClientReadStreamDependencies {
   // to deliver the metadata on the next iteration of the event loop.
   // metadata_cached_ owns the fetched metadata that will be delivered on
   // the timer.
-  std::unique_ptr<LibeventTimer> delivery_timer_;
+  std::unique_ptr<Timer> delivery_timer_;
 
   // currently running NodeSetFinder
   std::unique_ptr<NodeSetFinder> nodeset_finder_;
@@ -1130,6 +1127,10 @@ class ClientReadStream : boost::noncopyable {
   // delivery of a record or gap to the application
   void adjustRedeliveryTimer(bool delivery_success);
 
+  void activateRedeliveryTimer();
+  void resetRedeliveryTimer();
+  void cancelRedeliveryTimer();
+
   /**
    * Number of shards we are trying to read from.
    */
@@ -1248,6 +1249,11 @@ class ClientReadStream : boost::noncopyable {
 
   // ID of log we are reading from
   logid_t log_id_;
+
+  /**
+   * Log group name to be retrieved at start.
+   */
+  std::string log_group_name_ = "<WAITING LOGSCONFIG>";
 
   /**
    * LSN from which the client started reading.
@@ -1547,7 +1553,7 @@ class ClientReadStream : boost::noncopyable {
   std::chrono::milliseconds last_received_ts_{0};
 
   // @see scheduleRewind().
-  std::unique_ptr<LibeventTimer> immediate_rewind_timer_;
+  std::unique_ptr<Timer> immediate_rewind_timer_;
 
   // @see scheduleRewind().
   bool rewind_scheduled_ = false;

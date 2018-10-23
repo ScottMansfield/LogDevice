@@ -5,20 +5,20 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
-
-#include <folly/Memory.h>
-#include <queue>
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeSetAccessor.h"
 
+#include <queue>
+
+#include <folly/Memory.h>
+#include <gtest/gtest.h>
+
+#include "logdevice/common/Timer.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/debug.h"
 #include "logdevice/common/test/MockBackoffTimer.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
 #include "logdevice/common/util.h"
-
-#include "logdevice/common/debug.h"
 
 namespace facebook { namespace logdevice {
 
@@ -224,7 +224,7 @@ class MockedStorageSetAccessor : public StorageSetAccessor {
                            test->timeout_),
         test_(test) {}
 
-  std::unique_ptr<LibeventTimer>
+  std::unique_ptr<Timer>
   createJobTimer(std::function<void()> /*callback*/) override {
     return nullptr;
   }
@@ -279,7 +279,8 @@ void NodeSetAccessorTest::setUp() {
   auto logs_config = std::make_unique<configuration::LocalLogsConfig>();
   addLog(logs_config.get(), LOG_ID, replication_, extras_, nodeset_size, {});
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("nodeset_accessor_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "nodeset_accessor_test", std::move(nodes_config)),
       std::move(logs_config));
 
   accessor_.reset(new MockedStorageSetAccessor(this));

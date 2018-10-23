@@ -14,8 +14,9 @@
 
 namespace facebook { namespace logdevice {
 
-class PluginPack;
+class LegacyPluginPack;
 class LogsConfig;
+class PluginRegistry;
 class UpdateableConfig;
 
 /**
@@ -27,9 +28,11 @@ class UpdateableConfig;
 class ServerConfigSource : public ConfigSource {
  public:
   explicit ServerConfigSource(const LogsConfig* alternative_logs_config,
-                              std::shared_ptr<PluginPack> plugin)
+                              std::shared_ptr<LegacyPluginPack> plugin,
+                              std::shared_ptr<PluginRegistry> plugin_registry)
       : alternative_logs_config_(alternative_logs_config),
-        plugin_(std::move(plugin)) {}
+        plugin_(std::move(plugin)),
+        plugin_registry_(std::move(plugin_registry)) {}
   ~ServerConfigSource() override {
     // The local processor needs to shutdown its workers first, before anything
     // else gets destroyed
@@ -50,7 +53,8 @@ class ServerConfigSource : public ConfigSource {
   UpdateableSettings<Settings> updateable_settings_;
   std::shared_ptr<UpdateableConfig> config_;
   const LogsConfig* alternative_logs_config_;
-  std::shared_ptr<PluginPack> plugin_;
+  std::shared_ptr<LegacyPluginPack> plugin_;
+  std::shared_ptr<PluginRegistry> plugin_registry_;
   ConfigSubscriptionHandle server_config_subscription_;
 
   void init(const std::string& path, const std::vector<std::string>& hosts);

@@ -5,19 +5,20 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/configuration/logs/LogsConfigManager.h"
+
+#include <algorithm>
+
 #include "logdevice/common/Sender.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/configuration/InternalLogs.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/configuration/logs/LogsConfigApiTracer.h"
 #include "logdevice/common/configuration/logs/LogsConfigDeltaTypes.h"
-#include "logdevice/common/configuration/logs/LogsConfigManager.h"
 #include "logdevice/common/configuration/logs/LogsConfigTree.h"
 #include "logdevice/common/protocol/LOGS_CONFIG_API_REPLY_Message.h"
 #include "logdevice/common/stats/ServerHistograms.h"
-
-#include <algorithm>
 
 using facebook::logdevice::configuration::LocalLogsConfig;
 using facebook::logdevice::logsconfig::Delta;
@@ -82,7 +83,6 @@ LogsConfigManager::LogsConfigManager(
   auto updateable_server_config = updateable_config_->updateableServerConfig();
   state_machine_ = std::make_unique<LogsConfigStateMachine>(
       settings_, updateable_server_config, is_writable_);
-  is_running_ = false;
 }
 
 void LogsConfigManager::onSettingsUpdated() {
@@ -145,8 +145,10 @@ void LogsConfigManager::start() {
               "being disabled in settings, ignoring the update. ");
       return;
     }
-    ld_info("Received update from LogsConfigStateMachine, version %s",
-            toString(tree.version()).c_str());
+    RATELIMIT_INFO(std::chrono::seconds(10),
+                   1,
+                   "Received update from LogsConfigStateMachine, version %s",
+                   toString(tree.version()).c_str());
     STAT_INCR(getStats(), logsconfig_manager_received_update);
     activatePublishTimer();
   };
@@ -177,7 +179,7 @@ void LogsConfigManager::activatePublishTimer() {
     // timer.
     Worker* w = Worker::onThisThread(true);
     if (!publish_timer_.isAssigned()) {
-      publish_timer_.assign(w->getEventBase(), [this] {
+      publish_timer_.assign([this] {
         // the tree may have been updated during grace_period, use
         // ReplicatedStateMachine::getState() to retrieve the current tree.
         updateLogsConfig(getStateMachine()->getState());
@@ -594,7 +596,7 @@ Request::Execution LogsConfigManagerReply::execute() {
     ld_check(insert_result.second);
 
     retry_timer_ = std::make_unique<ExponentialBackoffTimer>(
-        EventLoop::onThisThread()->getEventBase(),
+
         std::bind(&LogsConfigManagerReply::onRetry, this),
         std::chrono::milliseconds(10),
         std::chrono::milliseconds(100));

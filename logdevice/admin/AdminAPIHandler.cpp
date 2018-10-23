@@ -9,10 +9,12 @@
 #include "logdevice/admin/AdminAPIHandler.h"
 
 #include <array>
+
 #include <folly/MoveWrapper.h>
 #include <folly/stats/MultiLevelTimeSeries.h>
 #include <thrift/lib/cpp/util/EnumUtils.h>
 
+#include "logdevice/admin/Conv.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/configuration/logs/LogsConfigManager.h"
 #include "logdevice/common/request_util.h"
@@ -22,8 +24,6 @@
 #include "logdevice/server/LogGroupThroughput.h"
 #include "logdevice/server/Server.h"
 #include "logdevice/server/ServerProcessor.h"
-
-using namespace facebook::logdevice;
 
 namespace facebook { namespace logdevice {
 
@@ -115,21 +115,22 @@ void AdminAPIHandler::getSettings(
   }
 }
 
-folly::Future<folly::Unit>
-AdminAPIHandler::future_takeLogTreeSnapshot(thrift::unsigned64 min_version) {
+folly::SemiFuture<folly::Unit> AdminAPIHandler::semifuture_takeLogTreeSnapshot(
+    thrift::unsigned64 min_version) {
   folly::Promise<folly::Unit> p;
+  auto future = p.getSemiFuture();
 
   // Are we running with LCM?
   if (!processor_->settings()->enable_logsconfig_manager) {
     thrift::NotSupported error;
     error.set_message("LogsConfigManager is disabled in settings on this node");
     p.setException(std::move(error));
-    return p.getFuture();
+    return future;
   } else if (!processor_->settings()->logsconfig_snapshotting) {
     thrift::NotSupported error;
     error.set_message("LogsConfigManager snapshotting is not enabled");
     p.setException(std::move(error));
-    return p.getFuture();
+    return future;
   }
 
   auto logsconfig_worker_type =
@@ -138,7 +139,7 @@ AdminAPIHandler::future_takeLogTreeSnapshot(thrift::unsigned64 min_version) {
       worker_id_t{LogsConfigManager::getLogsConfigManagerWorkerIdx(
           ld_server_->getProcessor()->getWorkerCount(logsconfig_worker_type))};
   // Because thrift does not support u64, we encode it in a i64.
-  std::uint64_t minimum_version = static_cast<std::uint64_t>(min_version);
+  uint64_t minimum_version = to_unsigned(min_version);
 
   auto cb = [minimum_version](folly::Promise<folly::Unit> promise) mutable {
     // This is needed because we want to move this into a lambda, an
@@ -159,8 +160,7 @@ AdminAPIHandler::future_takeLogTreeSnapshot(thrift::unsigned64 min_version) {
                         logsconfig->getVersion(),
                         minimum_version)
               .str());
-      error.set_server_version(
-          static_cast<std::int64_t>(logsconfig->getVersion()));
+      error.set_server_version(static_cast<int64_t>(logsconfig->getVersion()));
       mpromise->setException(std::move(error));
       return;
     }

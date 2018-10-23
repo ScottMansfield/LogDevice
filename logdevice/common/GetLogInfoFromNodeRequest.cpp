@@ -5,17 +5,17 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include "GetLogInfoRequest.h"
-
 #include <folly/Memory.h>
 #include <folly/Random.h>
-#include "logdevice/common/configuration/Configuration.h"
+
+#include "GetLogInfoRequest.h"
 #include "logdevice/common/EventLoop.h"
 #include "logdevice/common/GetLogInfoRequest.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Sender.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/LOGS_CONFIG_API_Message.h"
 
@@ -255,7 +255,7 @@ void GetLogInfoFromNodeRequest::finalize(Status st, std::string json) {
 
 void GetLogInfoFromNodeRequest::createRetryTimer() {
   retry_timer_ = std::make_unique<ExponentialBackoffTimer>(
-      EventLoop::onThisThread()->getEventBase(),
+
       std::bind(&GetLogInfoFromNodeRequest::attemptSend, this),
       Worker::onThisThread()->settings().on_demand_logs_config_retry_delay);
   ld_check(retry_timer_ != nullptr);

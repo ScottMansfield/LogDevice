@@ -19,10 +19,10 @@
 #include "logdevice/common/MetaDataLogWriter.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Sequencer.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/ServerHistograms.h"
+#include "logdevice/common/util.h"
 
 namespace facebook { namespace logdevice {
 
@@ -224,8 +224,7 @@ Request::Execution LogRecoveryRequest::execute() {
   }
 
   if (delay_ > std::chrono::milliseconds::zero()) {
-    start_delay_timer_ = std::make_unique<LibeventTimer>(
-        Worker::onThisThread()->getEventBase(), [this] { start(); });
+    start_delay_timer_ = std::make_unique<Timer>([this] { start(); });
 
     // Defer log recovery, for delay_ milliseconds. We do this when we retry
     // recovery after a soft error.
@@ -315,7 +314,7 @@ void LogRecoveryRequest::getLastCleanEpoch() {
 
   if (!lce_backoff_timer_) {
     lce_backoff_timer_.reset(new ExponentialBackoffTimer(
-        EventLoop::onThisThread()->getEventBase(),
+
         std::bind(&LogRecoveryRequest::getLastCleanEpoch, this),
         std::chrono::milliseconds(100),
         std::chrono::milliseconds(10000)));
@@ -486,7 +485,7 @@ int LogRecoveryRequest::createEpochRecoveryMachines(
   ld_check(start <= until);
   ld_check(metadata.isValid());
   auto config = Worker::onThisThread()->getConfig();
-  auto log = config->getLogGroupByIDRaw(log_id_);
+  auto log = config->getLogGroupByIDShared(log_id_);
   if (!log) {
     // config has changed since the time this Sequencer was activated
     // log_id_ is no longer there.
@@ -665,7 +664,7 @@ void LogRecoveryRequest::readSequencerMetaData() {
 
   if (!seq_metadata_timer_) {
     auto timer = std::make_unique<ExponentialBackoffTimer>(
-        Worker::onThisThread()->getEventBase(),
+
         [this]() {
           ld_check(!seq_metadata_read_); // Otherwise timer should be cancelled
           readSequencerMetaData();
@@ -821,7 +820,7 @@ void LogRecoveryRequest::sealLog() {
   auto config = Worker::onThisThread()->getConfig();
   const auto& cluster_nodes = config->serverConfig()->getNodes();
 
-  auto log = config->getLogGroupByIDRaw(log_id_);
+  auto log = config->getLogGroupByIDShared(log_id_);
   if (!log) {
     // config has changed since the time this Sequencer was activated
     // log_id_ is no longer there.
@@ -935,13 +934,12 @@ void LogRecoveryRequest::checkNodesForSeal() {
 
 void LogRecoveryRequest::activateCheckSealTimer() {
   if (check_seal_timer_ == nullptr) {
-    check_seal_timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(), [this] {
-          checkNodesForSeal();
-          // run the job periodically throughout the life time of this
-          // LogRecoveryRequest
-          activateCheckSealTimer();
-        });
+    check_seal_timer_ = std::make_unique<Timer>([this] {
+      checkNodesForSeal();
+      // run the job periodically throughout the life time of this
+      // LogRecoveryRequest
+      activateCheckSealTimer();
+    });
   }
   check_seal_timer_->activate(
       SEAL_CHECK_INTERVAL, &Worker::onThisThread()->commonTimeouts());
@@ -1147,7 +1145,7 @@ void LogRecoveryRequest::onSealReply(ShardID from,
     ld_check(epoch_recovery_machines_.size() <= n_recovering_epochs);
     // the following are guaranteed by the deserializaton method for SEALED
     ld_check(reply.epoch_lng_.size() == n_recovering_epochs);
-    ld_check(reply.epoch_size_.size() == reply.epoch_lng_.size());
+    ld_check(reply.epoch_offset_map_.size() == reply.epoch_lng_.size());
     ld_check(reply.last_timestamp_.size() == reply.epoch_lng_.size());
     ld_check(reply.max_seen_lsn_.size() == n_recovering_epochs);
 
@@ -1161,6 +1159,10 @@ void LogRecoveryRequest::onSealReply(ShardID from,
     for (int i = n_recovering_epochs - epoch_recovery_machines_.size();
          i < reply.epoch_lng_.size();
          i++, erm++) {
+      // TODO:(T33977412): modify EpochRecovery to deal with OffsetMap instead
+      // of just a byte offset.
+      const auto offset =
+          reply.epoch_offset_map_[i].getCounter(CounterType::BYTE_OFFSET);
       ld_check(erm != epoch_recovery_machines_.end());
 
       if (erm->epoch_ != lsn_to_epoch(reply.epoch_lng_[i])) {
@@ -1226,15 +1228,16 @@ void LogRecoveryRequest::onSealReply(ShardID from,
         }
       } else {
         // the sealed node does not support sending TailRecord yet, compose a
-        // tail record from its (lng, last_timestamp, epoch_size).
+        // tail record from its (lng, last_timestamp, epoch_offset_map).
         // Note: only consider it as a tail if lng > ESN_INVALID
         if (lsn_to_esn(reply.epoch_lng_[i]) > ESN_INVALID) {
           epoch_tail = TailRecord({log_id_,
                                    reply.epoch_lng_[i],
                                    reply.last_timestamp_[i],
-                                   {reply.epoch_size_[i]},
+                                   {offset},
                                    TailRecordHeader::OFFSET_WITHIN_EPOCH,
                                    {}},
+                                  reply.epoch_offset_map_[i],
                                   std::shared_ptr<PayloadHolder>());
 
           ld_check(epoch_tail.value().isValid());
@@ -1249,7 +1252,7 @@ void LogRecoveryRequest::onSealReply(ShardID from,
       if (erm->onSealed(from,
                         lsn_to_esn(reply.epoch_lng_[i]),
                         max_seen_esn,
-                        reply.epoch_size_[i],
+                        offset,
                         std::move(epoch_tail))) {
         return;
       }
@@ -1319,8 +1322,7 @@ void LogRecoveryRequest::allEpochsRecovered() {
 void LogRecoveryRequest::completeSoon(Status status) {
   epoch_recovery_machines_.clear();
   deferredCompleteTimer_ =
-      std::make_unique<LibeventTimer>(EventLoop::onThisThread()->getEventBase(),
-                                      [this, status] { complete(status); });
+      std::make_unique<Timer>([this, status] { complete(status); });
   deferredCompleteTimer_->activate(
       std::chrono::milliseconds(0), &Worker::onThisThread()->commonTimeouts());
 }

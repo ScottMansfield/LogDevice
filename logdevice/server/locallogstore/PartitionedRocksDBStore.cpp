@@ -6,9 +6,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include "PartitionedRocksDBStore.h"
-#include "PartitionedRocksDBStoreFindKey.h"
-#include "PartitionedRocksDBStoreFindTime.h"
-#include "PartitionedRocksDBStoreIterators.h"
 
 #include <algorithm>
 #include <chrono>
@@ -20,36 +17,32 @@
 #include <folly/Likely.h>
 #include <folly/Optional.h>
 #include <folly/hash/Hash.h>
-
 #include <rocksdb/cache.h>
 #include <rocksdb/compaction_filter.h>
 #include <rocksdb/convenience.h>
 #include <rocksdb/merge_operator.h>
 #include <rocksdb/sst_file_manager.h>
 
+#include "PartitionedRocksDBStoreFindKey.h"
+#include "PartitionedRocksDBStoreFindTime.h"
+#include "PartitionedRocksDBStoreIterators.h"
 #include "logdevice/common/ConstructorFailed.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/MetaDataLog.h"
 #include "logdevice/common/ThreadID.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/Worker.h"
-
+#include "logdevice/common/debug.h"
 #include "logdevice/common/stats/Stats.h"
-
+#include "logdevice/common/util.h"
 #include "logdevice/server/ServerProcessor.h"
-
 #include "logdevice/server/locallogstore/MemtableFlushedRequest.h"
 #include "logdevice/server/locallogstore/RocksDBCompactionFilter.h"
 #include "logdevice/server/locallogstore/RocksDBEnv.h"
 #include "logdevice/server/locallogstore/RocksDBKeyFormat.h"
 #include "logdevice/server/locallogstore/RocksDBListener.h"
 #include "logdevice/server/locallogstore/WriteOps.h"
-
 #include "logdevice/server/read_path/LogStorageStateMap.h"
-
 #include "logdevice/server/storage/LocalLogStoreUtils.h"
-
 #include "logdevice/server/storage_tasks/ShardedStorageThreadPool.h"
 
 namespace facebook { namespace logdevice {
@@ -408,8 +401,7 @@ void PartitionedRocksDBStore::init(const Configuration* config) {
   ld_spew("Found %zd column families", column_families.size());
 
   if (!(open(column_families, meta_cf_options, config) && readDirectories() &&
-        (getSettings()->read_only ||
-         (finishInterruptedDrops() && removeDeprecatedMetadata())))) {
+        (getSettings()->read_only || finishInterruptedDrops()))) {
     throw ConstructorFailed();
   }
 
@@ -1347,26 +1339,6 @@ bool PartitionedRocksDBStore::finishInterruptedDrops() {
     cleanUpPartitionMetadataAfterDrop(oldest_partition_id_);
   }
 
-  return true;
-}
-
-bool PartitionedRocksDBStore::removeDeprecatedMetadata() {
-  ld_check(!getSettings()->read_only);
-  ld_check(!immutable_.load());
-  // Remove OldestPartitionMetadata
-  RocksDBKeyFormat::OldestPartitionKey_DEPRECATED_DO_NOT_USE key;
-  rocksdb::WriteBatch batch;
-  batch.Delete(
-      metadata_cf_.get(),
-      rocksdb::Slice(reinterpret_cast<const char*>(&key), sizeof(key)));
-  rocksdb::WriteOptions options;
-  auto status = writer_->writeBatch(options, &batch);
-  if (!status.ok()) {
-    ld_error("Error when trying to delete any OldestPartitionMetadata: %s",
-             status.ToString().c_str());
-    return false;
-  }
-  batch.Clear();
   return true;
 }
 
@@ -3158,9 +3130,10 @@ int PartitionedRocksDBStore::writeMultiImpl(
       }
       auto status = writer_->writeBatch(rocksdb::WriteOptions(), &dirty_batch);
       if (!status.ok()) {
-        ld_critical("Failed to write partition dirty data for shard %u: %s",
-                    getShardIdx(),
-                    status.ToString().c_str());
+        // TODO (#34059727): this is not handled property.
+        ld_error("Failed to write partition dirty data for shard %u: %s",
+                 getShardIdx(),
+                 status.ToString().c_str());
       } else {
         FlushToken wal_token = maxWALSyncToken();
         for (const auto& op : dirty_ops) {
@@ -4064,8 +4037,8 @@ PartitionedRocksDBStore::getEffectiveBacklogDuration(
     log_state->setLogRemovalTime(log_removal_time);
   }
 
-  const LogsConfig::LogGroupNode* log_config =
-      config->getLogGroupByIDRaw(log_id);
+  const std::shared_ptr<LogsConfig::LogGroupNode> log_config =
+      config->getLogGroupByIDShared(log_id);
   if (!log_config) {
     std::chrono::seconds no_trim_until =
         std::chrono::seconds::max() == log_removal_time
@@ -4363,7 +4336,8 @@ void PartitionedRocksDBStore::performCompactionInternal(
   ld_check(!immutable_.load());
   PartitionPtr partition = to_compact.partition;
   partition_id_t partition_id = partition->id_;
-  if (partition_id == latest_.get()->id_) {
+  if (to_compact.reason != PartitionToCompact::Reason::PARTIAL &&
+      partition_id == latest_.get()->id_) {
     ld_warning("Tried to compact latest partition %lu", partition_id);
     return;
   }
@@ -4379,7 +4353,8 @@ void PartitionedRocksDBStore::performCompactionInternal(
       last_compacted = std::to_string(ago_seconds.count()) + " seconds ago";
     }
 
-    ld_log(partial ? dbg::Level::DEBUG : dbg::Level::INFO,
+    ld_log((partial && partition_id < latest_.get()->id_) ? dbg::Level::DEBUG
+                                                          : dbg::Level::INFO,
            "Starting %spartial compaction of partition %lu, reason: %s, "
            "last compacted: %s, shard %u",
            partial ? "" : "non-",
@@ -5685,6 +5660,7 @@ void PartitionedRocksDBStore::loPriBackgroundThreadRun() {
     }
 
     PartitionToCompact::removeDuplicates(&to_compact);
+    PartitionToCompact::interleavePartialAndNormalCompactions(&to_compact);
 
     PER_SHARD_STAT_SET(stats_,
                        pending_compactions,
@@ -5720,8 +5696,12 @@ void PartitionedRocksDBStore::loPriBackgroundThreadRun() {
       }
     }
 
-    // Update trash size stat
+    // Update stats for total trash size and the rate limit on its deletion
     PER_SHARD_STAT_SET(stats_, trash_size, shard_idx_, getTotalTrashSize());
+    PER_SHARD_STAT_SET(stats_,
+                       trash_deletion_ratelimit,
+                       shard_idx_,
+                       getSettings()->sst_delete_bytes_per_sec);
   }
 
   ld_info("Shard %d lo-pri background thread finished", getShardIdx());

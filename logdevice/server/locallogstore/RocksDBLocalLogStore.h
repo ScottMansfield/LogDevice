@@ -8,8 +8,8 @@
 #pragma once
 
 #include <atomic>
-#include <cstdlib>
 #include <chrono>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -22,14 +22,12 @@
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/stats/Stats.h"
-#include "logdevice/server/locallogstore/IteratorTracker.h"
-
 #include "logdevice/include/types.h"
-
-#include "logdevice/server/locallogstore/RocksDBLogStoreBase.h"
-#include "logdevice/server/locallogstore/RocksDBWriter.h"
+#include "logdevice/server/locallogstore/IteratorTracker.h"
 #include "logdevice/server/locallogstore/RocksDBKeyFormat.h"
+#include "logdevice/server/locallogstore/RocksDBLogStoreBase.h"
 #include "logdevice/server/locallogstore/RocksDBLogStoreConfig.h"
+#include "logdevice/server/locallogstore/RocksDBWriter.h"
 
 namespace facebook { namespace logdevice {
 
@@ -156,6 +154,10 @@ class RocksDBLocalLogStore : public RocksDBLogStoreBase {
     // Propagate debug info to subiterators.
     void setContextString(const char* str) override;
 
+    size_t getIOBytesUnnormalized() const override {
+      return RocksDBLogStoreBase::getIOBytesUnnormalized();
+    }
+
     // Passed to ReadFilter.
     // Used by PartitionedRocksDBStore::Iterator: it uses a CSIWrapper confined
     // to a single partition, and the time range comes from partition metadata.
@@ -257,6 +259,9 @@ class RocksDBLocalLogStore : public RocksDBLogStoreBase {
     void invalidate() override;
     const LocalLogStore* getStore() const override;
     bool tracingEnabled() const override;
+    size_t getIOBytesUnnormalized() const override {
+      return RocksDBLogStoreBase::getIOBytesUnnormalized();
+    }
 
    private:
     std::unique_ptr<CSIWrapper> iterator_;

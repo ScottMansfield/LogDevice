@@ -8,6 +8,7 @@
 #include "NodesConfigParser.h"
 
 #include <folly/dynamic.h>
+
 #include "logdevice/common/ConstructorFailed.h"
 #include "logdevice/common/commandline_util_chrono.h"
 #include "logdevice/common/configuration/NodesConfig.h"
@@ -491,19 +492,20 @@ static bool parseSequencer(const folly::dynamic& nodeMap,
   if (getBoolFromMap(nodeMap, "sequencer", sequencing_enabled)) {
     // Default weight is 1.0 or 0 depending on enable state.
     sequencer_weight = static_cast<double>(sequencing_enabled);
-    if (getDoubleFromMap(nodeMap, "sequencer_weight", sequencer_weight)) {
+    if (sequencing_enabled &&
+        getDoubleFromMap(nodeMap, "sequencer_weight", sequencer_weight)) {
       if (sequencer_weight < 0) {
         ld_error("Invalid value of 'sequencer_weight' attribute. Expected a "
                  "non-negative, floating point number");
         err = E::INVALID_CONFIG;
         return false;
       }
-      if (sequencing_enabled && sequencer_weight == 0) {
+      if (sequencer_weight == 0) {
         ld_warning("Enabled sequencer has a weight of 0. This sequencer will "
                    "not orchestrate the writes for any logs. Prefer setting "
                    "'sequencer' to false when disabling sequencing on a node.");
       }
-    } else if (err != E::NOTFOUND) {
+    } else if (sequencing_enabled && err != E::NOTFOUND) {
       ld_error("Invalid type for 'sequencer_weight' attribute. Expected a "
                "double");
       err = E::INVALID_CONFIG;

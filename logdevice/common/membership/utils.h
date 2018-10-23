@@ -8,12 +8,13 @@
 #pragma once
 
 #include <string>
+
 #include <folly/Range.h>
 
 #include "logdevice/common/debug.h"
+#include "logdevice/common/membership/SequencerMembership.h"
 #include "logdevice/common/membership/StorageState.h"
 #include "logdevice/common/membership/StorageStateTransitions.h"
-#include "logdevice/common/membership/SequencerMembership.h"
 
 namespace facebook { namespace logdevice { namespace membership {
 
@@ -33,7 +34,7 @@ inline constexpr folly::StringPiece toString(StorageState state) {
       return "dm";
     case StorageState::INVALID:
       return "invalid";
-  };
+  }
   return "internal error";
 }
 
@@ -47,7 +48,7 @@ inline constexpr folly::StringPiece toString(MetaDataStorageState state) {
       return "promoting";
     case MetaDataStorageState::INVALID:
       return "invalid";
-  };
+  }
   return "internal error";
 }
 

@@ -15,10 +15,10 @@
 #include "logdevice/common/EventLoop.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/RebuildingTypes.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/WorkerCallbackHelper.h"
 #include "logdevice/common/event_log/EventLogRecord.h"
+#include "logdevice/common/types_internal.h"
 
 namespace facebook { namespace logdevice {
 
@@ -33,10 +33,7 @@ EventLogWriter::~EventLogWriter() = default;
 std::unique_ptr<BackoffTimer>
 EventLogWriter::createAppendRetryTimer(std::function<void()> callback) {
   auto timer = std::make_unique<ExponentialBackoffTimer>(
-      EventLoop::onThisThread()->getEventBase(),
-      callback,
-      std::chrono::milliseconds(200),
-      std::chrono::seconds(10));
+      callback, std::chrono::milliseconds(200), std::chrono::seconds(10));
   timer->setTimeoutMap(&Worker::onThisThread()->commonTimeouts());
   return std::move(timer);
 }

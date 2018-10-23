@@ -9,8 +9,8 @@
 
 #include <unordered_map>
 
-#include "logdevice/common/protocol/Message.h"
 #include "logdevice/common/ClientID.h"
+#include "logdevice/common/protocol/Message.h"
 
 namespace facebook { namespace logdevice {
 
@@ -31,7 +31,6 @@ class NODE_STATS_AGGREGATE_Message : public Message {
   static MessageReadResult deserialize(ProtocolReader& reader);
 
   virtual Disposition onReceived(const Address& from) override;
-  virtual uint16_t getMinProtocolVersion() const override;
 
   NODE_STATS_AGGREGATE_Header header_;
 

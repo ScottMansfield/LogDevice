@@ -7,15 +7,17 @@
  */
 
 #include "GetTrimPointRequest.h"
+
 #include <folly/Memory.h>
+
 #include "logdevice/common/AllSequencers.h"
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/EventLoop.h"
 #include "logdevice/common/Processor.h"
-#include "logdevice/common/protocol/GET_TRIM_POINT_Message.h"
 #include "logdevice/common/Sender.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/debug.h"
+#include "logdevice/common/protocol/GET_TRIM_POINT_Message.h"
 
 namespace facebook { namespace logdevice {
 
@@ -34,8 +36,7 @@ Request::Execution GetTrimPointRequest::execute() {
 
   // set request timer
   request_timer_ =
-      std::make_unique<LibeventTimer>(Worker::onThisThread()->getEventBase(),
-                                      [this] { this->onRequestTimeout(); });
+      std::make_unique<Timer>([this] { this->onRequestTimeout(); });
 
   // broadcast the init messages
   onRequestTimeout();

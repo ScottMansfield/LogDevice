@@ -9,11 +9,9 @@
 #include <cstdlib>
 #include <future>
 #include <memory>
-
 #include <unistd.h>
 
 #include <folly/Memory.h>
-
 #include <gtest/gtest.h>
 
 #include "logdevice/common/EventLoopHandle.h"
@@ -21,7 +19,6 @@
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/Semaphore.h"
 #include "logdevice/common/Sender.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/Socket.h"
 #include "logdevice/common/SocketCallback.h"
 #include "logdevice/common/Worker.h"
@@ -31,6 +28,7 @@
 #include "logdevice/common/protocol/GET_SEQ_STATE_Message.h"
 #include "logdevice/common/protocol/HELLO_Message.h"
 #include "logdevice/common/protocol/STORED_Message.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/stats/Stats.h"
 #include "logdevice/common/test/TestUtil.h"
 #include "logdevice/include/ClientSettings.h"
@@ -170,7 +168,7 @@ static std::shared_ptr<UpdateableConfig> create_config(int ld_port) {
 
   auto updateable_config = std::make_shared<UpdateableConfig>();
   updateable_config->updateableServerConfig()->update(
-      ServerConfig::fromData(CLUSTER_NAME, nodes, meta_config));
+      ServerConfig::fromDataTest(CLUSTER_NAME, nodes, meta_config));
   return updateable_config;
 }
 

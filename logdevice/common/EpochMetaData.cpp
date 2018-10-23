@@ -9,9 +9,11 @@
 
 #include <folly/Memory.h>
 
-#include "logdevice/common/debug.h"
 #include "logdevice/common/LegacyLogToShard.h"
 #include "logdevice/common/NodeSetSelectorUtils.h"
+#include "logdevice/common/debug.h"
+#include "logdevice/common/protocol/ProtocolReader.h"
+#include "logdevice/common/protocol/ProtocolWriter.h"
 #include "logdevice/common/util.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/Record.h"
@@ -45,7 +47,8 @@ bool EpochMetaData::validWithConfig(
     ld_error("Invalid epoch metadata for log %lu", log_id.val_);
     return false;
   }
-  const LogsConfig::LogGroupNode* logcfg = cfg->getLogGroupByIDRaw(log_id);
+  const std::shared_ptr<LogsConfig::LogGroupNode> logcfg =
+      cfg->getLogGroupByIDShared(log_id);
   if (!logcfg) {
     ld_error("No log config for log %lu", log_id.val_);
     return false;
@@ -89,7 +92,8 @@ bool EpochMetaData::matchesConfig(logid_t log_id,
   if (!validWithConfig(log_id, cfg)) {
     return false;
   }
-  const LogsConfig::LogGroupNode* logcfg = cfg->getLogGroupByIDRaw(log_id);
+  const std::shared_ptr<LogsConfig::LogGroupNode> logcfg =
+      cfg->getLogGroupByIDShared(log_id);
   if (!logcfg) {
     ld_log(debug_level, "No log config for log %lu", log_id.val_);
     return false;

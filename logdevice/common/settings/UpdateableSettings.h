@@ -10,15 +10,14 @@
 #include <chrono>
 #include <type_traits>
 #include <unordered_map>
-#include <boost/noncopyable.hpp>
 
 #include <boost/make_shared.hpp>
+#include <boost/noncopyable.hpp>
 #include <boost/program_options.hpp>
 
 #include "logdevice/common/UpdateableSharedPtr.h"
-#include "logdevice/common/util.h"
-
 #include "logdevice/common/settings/UpdateableSettings-details.h"
+#include "logdevice/common/util.h"
 
 /**
  * @file UpdateableSettings.h
@@ -79,6 +78,7 @@ constexpr const char* Sequencer = "Sequencer State";
 constexpr const char* Storage = "Storage";
 constexpr const char* Testing = "Testing";
 constexpr const char* WritePath = "Write path";
+constexpr const char* AdminAPI = "Admin API/server";
 }; // namespace SettingsCategory
 
 // Every bandle must implement this interface.

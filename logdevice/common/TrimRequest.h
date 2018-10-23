@@ -13,16 +13,16 @@
 #include <unordered_map>
 
 #include "logdevice/common/ClientBridge.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/NodeSetAccessor.h"
 #include "logdevice/common/NodeSetFinder.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/RequestType.h"
-#include "logdevice/common/types_internal.h"
-#include "logdevice/include/Err.h"
-#include "logdevice/include/Client.h"
 #include "logdevice/common/SocketCallback.h"
+#include "logdevice/common/Timer.h"
+#include "logdevice/common/types_internal.h"
+#include "logdevice/include/Client.h"
+#include "logdevice/include/Err.h"
 
 namespace facebook { namespace logdevice {
 
@@ -90,6 +90,10 @@ class TrimRequest : public Request {
     bypass_write_token_check_ = true;
   }
 
+  void bypassTailLSNCheck() {
+    bypass_tail_lsn_check_ = true;
+  }
+
  private:
   void fetchLogConfig();
 
@@ -154,6 +158,7 @@ class TrimRequest : public Request {
   worker_id_t target_worker_{-1};
 
   bool bypass_write_token_check_ = false;
+  bool bypass_tail_lsn_check_ = false;
 
   std::unique_ptr<NodeSetFinder> nodeset_finder_{nullptr};
   std::unique_ptr<StorageSetAccessor> storage_set_accessor_{nullptr};

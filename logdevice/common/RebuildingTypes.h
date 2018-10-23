@@ -12,11 +12,10 @@
 
 #include "logdevice/common/AdminCommandTable-fwd.h"
 #include "logdevice/common/DataClass.h"
-#include "logdevice/common/debug.h"
 #include "logdevice/common/ShardID.h"
 #include "logdevice/common/Timestamp.h"
 #include "logdevice/common/WorkerCallbackHelper.h"
-
+#include "logdevice/common/debug.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/types.h"
@@ -102,7 +101,10 @@ struct STORED_Header;
 struct STORE_Header;
 
 class ShardRebuildingV1;
-using ShardRebuildingRef = WorkerCallbackHelper<ShardRebuildingV1>::Ticket;
+using ShardRebuildingV1Ref = WorkerCallbackHelper<ShardRebuildingV1>::Ticket;
+
+class ShardRebuildingV2;
+using ShardRebuildingV2Ref = WorkerCallbackHelper<ShardRebuildingV2>::Ticket;
 
 class RecordRebuildingInterface {
  public:
@@ -202,7 +204,7 @@ class ShardRebuildingInterface {
 
   virtual ~ShardRebuildingInterface() = default;
 
-  // Must be called exactly once, right after constructor. Starte the
+  // Must be called exactly once, right after constructor. Starts the
   // re-replication work.
   virtual void
   start(std::unordered_map<logid_t, std::unique_ptr<RebuildingPlan>> plan) = 0;

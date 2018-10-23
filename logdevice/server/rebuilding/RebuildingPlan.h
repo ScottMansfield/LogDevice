@@ -10,6 +10,7 @@
 #include <boost/icl/interval_map.hpp>
 
 #include "logdevice/common/EpochMetaData.h"
+#include "logdevice/common/Timestamp.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/include/types.h"
 
@@ -49,6 +50,14 @@ class RebuildingPlan {
   void clearEpochRange() {
     epochsToRead.clear();
   }
+
+  // If the given epoch is covered by one of the ranges in epochsToRead,
+  // assigns that range to *out_range and returns the corresponding
+  // EpochMetadata. Otherwise finds the longest epoch range that contains
+  // the given epoch and doesn't intersect any epochsToRead, assigns that
+  // range to *out_range and returns nullptr.
+  std::shared_ptr<EpochMetaData>
+  lookUpEpoch(epoch_t epoch, std::pair<epoch_t, epoch_t>* out_range);
 
   std::string toString() const;
 

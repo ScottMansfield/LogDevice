@@ -5,19 +5,19 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/server/read_path/CatchupQueue.h"
 
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include <folly/Memory.h>
+#include <gtest/gtest.h>
 
 #include "logdevice/common/DataRecordOwnsPayload.h"
 #include "logdevice/common/FlowGroup.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/Sender.h"
-
 #include "logdevice/common/protocol/Compatibility.h"
 #include "logdevice/common/protocol/GAP_Message.h"
 #include "logdevice/common/protocol/Message.h"
@@ -25,17 +25,12 @@
 #include "logdevice/common/protocol/STARTED_Message.h"
 #include "logdevice/common/protocol/STORE_Message.h"
 #include "logdevice/common/protocol/WINDOW_Message.h"
-
 #include "logdevice/common/stats/Stats.h"
-
 #include "logdevice/common/test/MockBackoffTimer.h"
-#include "logdevice/common/test/MockLibeventTimer.h"
+#include "logdevice/common/test/MockTimer.h"
 #include "logdevice/server/ServerRecordFilterFactory.h"
-
 #include "logdevice/server/read_path/AllServerReadStreams.h"
-#include "logdevice/server/read_path/CatchupQueue.h"
 #include "logdevice/server/read_path/LogStorageStateMap.h"
-
 #include "logdevice/server/storage_tasks/ReadStorageTask.h"
 
 namespace facebook { namespace logdevice {
@@ -340,9 +335,9 @@ class MockCatchupQueueDependencies : public CatchupQueueDependencies {
     return std::move(timer);
   }
 
-  std::unique_ptr<LibeventTimer>
+  std::unique_ptr<Timer>
   createIteratorTimer(std::function<void()> callback) override {
-    auto timer = std::make_unique<MockLibeventTimer>();
+    auto timer = std::make_unique<MockTimer>();
     timer->setCallback(callback);
     return std::move(timer);
   }

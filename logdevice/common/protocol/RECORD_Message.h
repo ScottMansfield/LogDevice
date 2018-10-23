@@ -8,11 +8,12 @@
 #pragma once
 
 #include <memory>
+
 #include <boost/noncopyable.hpp>
 
 #include "logdevice/common/CopySet.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/protocol/Message.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/include/Record.h"
 #include "logdevice/include/types.h"
 
@@ -148,7 +149,7 @@ class RECORD_Message : public Message, boost::noncopyable {
   /**
    * Convenience method that calculates how much space a RECORD message
    * containing the given payload size would take in the output socket.
-   * Equivalent to creating the RECORD_Message and calling size()
+   * Approximately equivalent to creating the RECORD_Message and calling size()
    * on it.
    *
    * Note that this is only an estimate, it doesn't take into account the

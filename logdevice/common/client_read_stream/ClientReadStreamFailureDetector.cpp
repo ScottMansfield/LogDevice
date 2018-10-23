@@ -6,14 +6,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "logdevice/common/client_read_stream/ClientReadStreamFailureDetector.h"
+
 #include <algorithm>
 
 #include <folly/Format.h>
 #include <folly/Random.h>
 
-#include "logdevice/common/client_read_stream/ClientReadStreamFailureDetector.h"
-#include "logdevice/common/Worker.h"
 #include "logdevice/common/OutlierDetection.h"
+#include "logdevice/common/Worker.h"
 
 namespace facebook { namespace logdevice {
 
@@ -61,12 +62,10 @@ void ClientReadStreamFailureDetector::start() {
   // `removeExpiredOutliers()` and `checkForShardsBlockingWindow()` manually.
   Worker* worker = Worker::onThisThread(false);
   if (worker) {
-    expiry_timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase());
-    expiry_timer_->setCallback([this] { removeExpiredOutliers(TS::now()); });
-    timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase());
-    timer_->setCallback([this] { checkForShardsBlockingWindow(TS::now()); });
+    expiry_timer_ =
+        std::make_unique<Timer>([this] { removeExpiredOutliers(TS::now()); });
+    timer_ = std::make_unique<Timer>(
+        [this] { checkForShardsBlockingWindow(TS::now()); });
   }
 }
 

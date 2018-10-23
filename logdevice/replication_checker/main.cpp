@@ -6,36 +6,23 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <signal.h>
-
-#include <sys/prctl.h>
-
 #include <unordered_map>
 #include <unordered_set>
 
 #include <boost/program_options.hpp>
 #include <boost/tokenizer.hpp>
-
-#include <folly/dynamic.h>
-#include <folly/json.h>
 #include <folly/Bits.h>
 #include <folly/Random.h>
 #include <folly/Range.h>
 #include <folly/Singleton.h>
 #include <folly/Varint.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#include <sys/prctl.h>
 
 #include "logdevice/common/Checksum.h"
-#include "logdevice/common/client_read_stream/AllClientReadStreams.h"
-#include "logdevice/common/client_read_stream/ClientReadStream.h"
-#include "logdevice/common/client_read_stream/ClientReadStreamBufferFactory.h"
-#include "logdevice/common/commandline_util.h"
-#include "logdevice/common/commandline_util_chrono.h"
-
-#include "logdevice/common/ConfigInit.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/CopySet.h"
 #include "logdevice/common/DataRecordOwnsPayload.h"
-#include "logdevice/common/debug.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/LocalLogStoreRecordFormat.h"
 #include "logdevice/common/MetaDataLog.h"
 #include "logdevice/common/NoopTraceLogger.h"
@@ -43,24 +30,31 @@
 #include "logdevice/common/PrincipalParser.h"
 #include "logdevice/common/Processor.h"
 #include "logdevice/common/SequencerLocator.h"
-#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/SingleEvent.h"
 #include "logdevice/common/StopReadingRequest.h"
 #include "logdevice/common/SyncSequencerRequest.h"
+#include "logdevice/common/Timer.h"
 #include "logdevice/common/Timestamp.h"
-#include "logdevice/common/types_internal.h"
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/WorkerCallbackHelper.h"
+#include "logdevice/common/client_read_stream/AllClientReadStreams.h"
+#include "logdevice/common/client_read_stream/ClientReadStream.h"
+#include "logdevice/common/client_read_stream/ClientReadStreamBufferFactory.h"
+#include "logdevice/common/commandline_util.h"
+#include "logdevice/common/commandline_util_chrono.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/debug.h"
+#include "logdevice/common/settings/Settings.h"
+#include "logdevice/common/types_internal.h"
 #include "logdevice/common/util.h"
 #include "logdevice/include/Client.h"
 #include "logdevice/include/Err.h"
 #include "logdevice/include/LogTailAttributes.h"
 #include "logdevice/include/types.h"
-#include "logdevice/lib/ClientPluginPack.h"
 #include "logdevice/lib/ClientImpl.h"
+#include "logdevice/lib/ClientPluginPack.h"
 #include "logdevice/lib/ClientSettingsImpl.h"
-
 #include "logdevice/replication_checker/LogErrorTracker.h"
 #include "logdevice/replication_checker/ReplicationCheckerSettings.h"
 
@@ -672,21 +666,19 @@ class LogChecker : public std::enable_shared_from_this<LogChecker> {
     // reset, we  give up reading that log. This makes it possible for the user
     // to request that checker does not hang indefinitely if a log is not
     // available for reads.
-    idle_timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(), [self_weak] {
-          if (auto self = self_weak.lock()) {
-            self->finish("Timed out.");
-          }
-        });
+    idle_timer_ = std::make_unique<Timer>([self_weak] {
+      if (auto self = self_weak.lock()) {
+        self->finish("Timed out.");
+      }
+    });
 
-    read_duration_timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(), [self_weak] {
-          // The user requires to not spend more time reading this log. Finish
-          // successfully.
-          if (auto self = self_weak.lock()) {
-            self->finish("");
-          }
-        });
+    read_duration_timer_ = std::make_unique<Timer>([self_weak] {
+      // The user requires to not spend more time reading this log. Finish
+      // successfully.
+      if (auto self = self_weak.lock()) {
+        self->finish("");
+      }
+    });
     auto elapsed_time = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - start_time);
     auto execution_time_left =
@@ -696,12 +688,11 @@ class LogChecker : public std::enable_shared_from_this<LogChecker> {
 
     read_duration_timer_->activate(timer_duration);
 
-    throttle_timer_ = std::make_unique<LibeventTimer>(
-        EventLoop::onThisThread()->getEventBase(), [self_weak] {
-          if (auto self = self_weak.lock()) {
-            self->onThrottleTimerTick();
-          }
-        });
+    throttle_timer_ = std::make_unique<Timer>([self_weak] {
+      if (auto self = self_weak.lock()) {
+        self->onThrottleTimerTick();
+      }
+    });
 
     if (until_lsn_ != LSN_MAX) {
       startReading();
@@ -771,9 +762,9 @@ class LogChecker : public std::enable_shared_from_this<LogChecker> {
 
   folly::dynamic record_errors = folly::dynamic::object(); // Used if json==true
 
-  std::unique_ptr<LibeventTimer> idle_timer_;
-  std::unique_ptr<LibeventTimer> read_duration_timer_;
-  std::unique_ptr<LibeventTimer> throttle_timer_;
+  std::unique_ptr<Timer> idle_timer_;
+  std::unique_ptr<Timer> read_duration_timer_;
+  std::unique_ptr<Timer> throttle_timer_;
 
   // Used in order to throttle read throughput.
   bool throttled_ = false;

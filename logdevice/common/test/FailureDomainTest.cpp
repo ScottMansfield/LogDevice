@@ -5,15 +5,15 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include <numeric>
+
+#include <folly/Memory.h>
 #include <gtest/gtest.h>
 
-#include <numeric>
-#include <folly/Memory.h>
-
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/FailureDomainNodeSet.h"
-#include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/RecoverySet.h"
+#include "logdevice/common/configuration/Configuration.h"
+#include "logdevice/common/configuration/LocalLogsConfig.h"
 #include "logdevice/common/test/NodeSetTestUtil.h"
 
 using namespace facebook::logdevice;
@@ -111,7 +111,8 @@ void FailureDomainTest::setUp() {
   addLog(logs_config.get(), LOG_ID, replication_, 0, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "failure_domain_test", std::move(nodes_config)),
       std::move(logs_config));
 
   failure_set_ = std::make_unique<FailureDomainTestSet>(
@@ -144,7 +145,8 @@ void FailureDomainTest::setUpWithMultiScopes() {
   addLog(logs_config.get(), LOG_ID, replication_, 0, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "failure_domain_test", std::move(nodes_config)),
       std::move(logs_config));
 
   ReplicationProperty rep;
@@ -180,7 +182,8 @@ void FailureDomainTest::setUpWithShards() {
   addLog(logs_config.get(), LOG_ID, replication_, 0, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "failure_domain_test", std::move(nodes_config)),
       std::move(logs_config));
 
   ReplicationProperty rep;
@@ -215,7 +218,8 @@ void FailureDomainTest::setUpWithShardsAndOnlyRackReplication() {
   addLog(logs_config.get(), LOG_ID, replication_, 0, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "failure_domain_test", std::move(nodes_config)),
       std::move(logs_config));
 
   // We only require 2-way replication at rack scope.
@@ -862,7 +866,8 @@ TEST_F(FailureDomainTest, T30067676) {
   addLog(logs_config.get(), LOG_ID, replication_, 0, nodeset_size, {});
 
   config_ = std::make_shared<Configuration>(
-      ServerConfig::fromData("failure_domain_test", std::move(nodes_config)),
+      ServerConfig::fromDataTest(
+          "failure_domain_test", std::move(nodes_config)),
       std::move(logs_config));
 
   ReplicationProperty rep;

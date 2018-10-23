@@ -16,13 +16,13 @@
 #include <vector>
 
 #include "logdevice/common/ConfigSource.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/Semaphore.h"
-#include "logdevice/common/settings/Settings.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/configuration/ConfigUpdater.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LogsConfig.h"
 #include "logdevice/common/configuration/ServerConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
+#include "logdevice/common/settings/Settings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/common/stats/Stats.h"
 
@@ -46,10 +46,12 @@ class TextConfigUpdaterImpl : public ConfigSource::AsyncCallback,
       std::vector<std::unique_ptr<ConfigSource>>& sources_,
       std::shared_ptr<UpdateableServerConfig> target_server_config,
       std::shared_ptr<UpdateableLogsConfig> target_logs_config,
+      std::shared_ptr<UpdateableZookeeperConfig> target_zk_config,
       UpdateableSettings<Settings> updateable_settings,
       StatsHolder* stats = nullptr)
       : target_server_config_(target_server_config),
         target_logs_config_(target_logs_config),
+        target_zk_config_(target_zk_config),
         sources_(sources_),
         updateable_settings_(std::move(updateable_settings)),
         stats_(stats),
@@ -66,6 +68,7 @@ class TextConfigUpdaterImpl : public ConfigSource::AsyncCallback,
                               sources_,
                               updateable_config->updateableServerConfig(),
                               updateable_config->updateableLogsConfig(),
+                              updateable_config->updateableZookeeperConfig(),
                               std::move(updateable_settings),
                               stats) {}
   /**
@@ -134,6 +137,7 @@ class TextConfigUpdaterImpl : public ConfigSource::AsyncCallback,
  private:
   std::weak_ptr<UpdateableServerConfig> target_server_config_;
   std::weak_ptr<UpdateableLogsConfig> target_logs_config_;
+  std::weak_ptr<UpdateableZookeeperConfig> target_zk_config_;
 
   std::vector<std::unique_ptr<ConfigSource>>& sources_;
   std::unique_ptr<LogsConfig> alternative_logs_config_;
@@ -188,7 +192,7 @@ class TextConfigUpdaterImpl : public ConfigSource::AsyncCallback,
   // Supported extensions: .gz
   std::string maybeDecompress(const std::string& path,
                               std::string raw_contents);
-  // Update local config stat and set last_config_valid stats to 0 or 1
+  // Update local config stat and set last_config_invalid stats to 0 or 1
   // depending on validity of most recent received config.
   // Supposed to be called synchronously since update() is locked under mutex
   void setRecentConfigValidity(bool state);
@@ -199,6 +203,36 @@ class TextConfigUpdaterImpl : public ConfigSource::AsyncCallback,
   //         1 if new_config has a more recent version
   int compareServerConfig(const std::shared_ptr<ServerConfig>& old_config,
                           const std::shared_ptr<ServerConfig>& new_config);
+
+  // Compares new and old zookeeper configs
+  // Returns true if configs are identical
+  bool compareZookeeperConfig(const ZookeeperConfig* old_config,
+                              const ZookeeperConfig* new_config);
+
+  /* Result for a config update, of either
+   * - UPDATED:                   the config section was pushed successfully
+   * - SKIPPED:                   the config was already up to date and update
+   *                                was skipped
+   * - INVALID:                   the config update is invalid and was rejected
+   * - FORCE_RELOAD_LOGSCONFIG:   the config is updated and also requires an
+   *                                extra refresh of the log configuration
+   */
+  enum class ConfigUpdateResult {
+    UPDATED,
+    SKIPPED,
+    INVALID,
+    FORCE_RELOAD_LOGSCONFIG
+  };
+  ConfigUpdateResult
+  pushZookeeperConfig(const std::shared_ptr<ZookeeperConfig>& new_config);
+
+  ConfigUpdateResult
+  pushServerConfig(const std::shared_ptr<ServerConfig>& new_config);
+
+  ConfigUpdateResult
+  pushLogsConfig(const std::shared_ptr<LogsConfig>& new_config);
+
+  static std::string updateResultToString(ConfigUpdateResult result);
 };
 
 class TextConfigUpdater : public ConfigSource::AsyncCallback,

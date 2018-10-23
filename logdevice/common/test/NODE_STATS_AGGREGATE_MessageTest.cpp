@@ -5,21 +5,16 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#include "logdevice/common/protocol/NODE_STATS_AGGREGATE_Message.h"
+
 #include <gtest/gtest.h>
 
 #include "event2/buffer.h"
 #include "logdevice/common/libevent/compat.h"
-#include "logdevice/common/protocol/NODE_STATS_AGGREGATE_Message.h"
-#include "logdevice/common/protocol/ProtocolWriter.h"
 #include "logdevice/common/protocol/ProtocolReader.h"
+#include "logdevice/common/protocol/ProtocolWriter.h"
 
 using namespace facebook::logdevice;
-
-TEST(NODE_STATS_AGGREGATE_MessageTest, GetMinProtocolVersion) {
-  NODE_STATS_AGGREGATE_Message msg(NODE_STATS_AGGREGATE_Header{});
-  EXPECT_EQ(Compatibility::ProtocolVersion::NODE_STATS_AGGREGATE,
-            msg.getMinProtocolVersion());
-}
 
 TEST(NODE_STATS_AGGREGATE_MessageTest, SerializeAndDeserialize) {
   using unique_evbuffer =
@@ -29,7 +24,7 @@ TEST(NODE_STATS_AGGREGATE_MessageTest, SerializeAndDeserialize) {
     LD_EV(evbuffer_free)(ptr);
   });
 
-  auto proto = Compatibility::ProtocolVersion::NODE_STATS_AGGREGATE;
+  auto proto = Compatibility::MIN_PROTOCOL_SUPPORTED;
 
   NODE_STATS_AGGREGATE_Header header;
   header.msg_id = 1;
@@ -41,7 +36,6 @@ TEST(NODE_STATS_AGGREGATE_MessageTest, SerializeAndDeserialize) {
 
   ProtocolWriter writer(msg.type_, evbuf.get(), proto);
   msg.serialize(writer);
-  writer.endSerialization();
   auto write_count = writer.result();
 
   ASSERT_GT(write_count, 0);

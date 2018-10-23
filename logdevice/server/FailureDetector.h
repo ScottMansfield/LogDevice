@@ -14,7 +14,6 @@
 
 #include "logdevice/common/DomainIsolationChecker.h"
 #include "logdevice/common/EventLoopHandle.h"
-#include "logdevice/common/settings/GossipSettings.h"
 #include "logdevice/common/NodeID.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/RequestPump.h"
@@ -23,6 +22,7 @@
 #include "logdevice/common/Worker.h"
 #include "logdevice/common/configuration/ServerConfig.h"
 #include "logdevice/common/protocol/GOSSIP_Message.h"
+#include "logdevice/common/settings/GossipSettings.h"
 #include "logdevice/common/settings/UpdateableSettings.h"
 #include "logdevice/common/types_internal.h"
 #include "logdevice/server/sequencer_boycotting/BoycottTracker.h"
@@ -228,7 +228,7 @@ class FailureDetector {
   class RandomSelector;
   class RoundRobinSelector;
 
-  LibeventTimer cs_timer_;
+  Timer cs_timer_;
   bool waiting_for_cluster_state_{true};
 
   // Don't rely on gossip() and detectFailures() to transition this node out
@@ -236,7 +236,7 @@ class FailureDetector {
   // sure that this node transitions from SUSPECT to ALIVE earliest(on this node
   // , as opposed to some other node). The rare case when this may not happen is
   // when gossip thread is not scheduled for some time.
-  LibeventTimer suspect_timer_;
+  Timer suspect_timer_;
   void startSuspectTimer();
 
   void startGossiping();
@@ -300,6 +300,8 @@ class FailureDetector {
   // Check if incoming gossip message is more than
   // 'gossip_time_skew_threshold' milli-seconds delayed
   bool checkSkew(const GOSSIP_Message& msg);
+
+  bool isValidInstanceId(std::chrono::milliseconds id, node_index_t idx);
 
   // Detects which nodes are down based on the data in gossip_list_ and
   // suspect_matrix_.

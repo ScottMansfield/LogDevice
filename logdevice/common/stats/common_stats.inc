@@ -14,6 +14,17 @@
 
 // Stats shared between server and client
 
+// Number of calls to postRequest
+STAT_DEFINE(post_request_total, SUM)
+// Number of postRequest failures.
+STAT_DEFINE(post_request_failed, SUM)
+// Number of Requests executed on Worker threads.
+STAT_DEFINE(worker_requests_executed, SUM)
+// Number of Requests > request_execution_delay_threshold in execute().
+STAT_DEFINE(worker_slow_requests, SUM)
+// Number of tasks on background thread that spent > 10 msec executing.
+STAT_DEFINE(background_slow_requests, SUM)
+
 // number of MetaDataLogReaders created
 STAT_DEFINE(metadata_log_readers_created, SUM)
 // number of MetaDataLogReaders started
@@ -38,6 +49,13 @@ STAT_DEFINE(config_changed_ignored_update_in_progress, SUM)
 // Number of config updates that occurred as a result of
 // CONFIG_CHANGED_Messages.
 STAT_DEFINE(config_changed_update, SUM)
+
+// Set to 1 once the node received valid config. It also resets to 0 if a bad
+// config is received, so this is really the validity of the most recent config
+// received.
+STAT_DEFINE(last_config_invalid, MAX)
+// Config update rejected by a hook
+STAT_DEFINE(config_update_invalid, SUM)
 
 // number of times nodeset finder got metadata from sequencer
 STAT_DEFINE(nodeset_finder_read_from_sequencer, SUM)
@@ -123,6 +141,7 @@ STAT_DEFINE(get_seq_state_attempts_context_unreleased_record, SUM)
 STAT_DEFINE(get_seq_state_attempts_context_metadata_util, SUM)
 STAT_DEFINE(get_seq_state_attempts_context_historical_metadata, SUM)
 STAT_DEFINE(get_seq_state_attempts_context_get_tail_record, SUM)
+STAT_DEFINE(get_seq_state_attempts_context_reader_monitoring, SUM)
 
 // No. of actual GetSeqStateRequests that were sent out
 STAT_DEFINE(get_seq_state_unique_context_unknown, SUM)
@@ -142,5 +161,6 @@ STAT_DEFINE(get_seq_state_unique_context_unreleased_record, SUM)
 STAT_DEFINE(get_seq_state_unique_context_metadata_util, SUM)
 STAT_DEFINE(get_seq_state_unique_context_historical_metadata, SUM)
 STAT_DEFINE(get_seq_state_unique_context_get_tail_record, SUM)
+STAT_DEFINE(get_seq_state_unique_context_reader_monitoring, SUM)
 
 #undef STAT_DEFINE

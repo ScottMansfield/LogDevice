@@ -10,10 +10,9 @@
 #include <queue>
 #include <unordered_map>
 
-#include "logdevice/server/storage/CachedDigest.h"
-
 #include "logdevice/common/SocketCallback.h"
 #include "logdevice/common/types_internal.h"
+#include "logdevice/server/storage/CachedDigest.h"
 
 namespace facebook { namespace logdevice {
 
@@ -32,8 +31,7 @@ class AllCachedDigests;
  */
 class ClientDigests {
  public:
-  ClientDigests(ClientID cid, AllCachedDigests* parent)
-      : client_id_(cid), parent_(parent) {}
+  ClientDigests(ClientID cid, AllCachedDigests* parent);
 
   /**
    * Attempt to construct a CachedDigest object and insert it to the map.
@@ -120,6 +118,8 @@ class AllCachedDigests {
   AllCachedDigests(size_t max_active_digests,
                    size_t max_bytes_queued_per_client_kb);
 
+  virtual ~AllCachedDigests() {}
+
   /**
    *  Create, if necessary, and attempt to activate a CachedDigest. Should be
    *  the only function to start cached digesting upon receiving a START
@@ -186,6 +186,36 @@ class AllCachedDigests {
     AllCachedDigests* owner;
   };
 
+  virtual std::unique_ptr<CachedDigest> createCachedDigest(
+      logid_t log_id,
+      shard_index_t shard,
+      read_stream_id_t rid,
+      ClientID client_id,
+      lsn_t start_lsn,
+      std::unique_ptr<const EpochRecordCache::Snapshot> epoch_snapshot,
+      ClientDigests* client_digests);
+
+  // used in tests
+  CachedDigest* getDigest(ClientID cid, read_stream_id_t rid);
+
+  size_t queueSize() const {
+    return queue_.size();
+  }
+
+  std::unique_ptr<Timer>& getRescheduleTimer() {
+    return reschedule_timer_;
+  }
+
+ protected:
+  virtual std::unique_ptr<Timer>
+  createRescheduleTimer(std::function<void()> callback);
+
+  virtual void activateRescheduleTimer();
+
+  virtual size_t getMaxStreamsStartedBatch() const {
+    return MAX_STREAMS_STARTED_BATCH;
+  }
+
  private:
   // TODO: if needed, make a separate cap and queue for metadata logs
   const size_t max_active_cached_digests_;
@@ -201,13 +231,15 @@ class AllCachedDigests {
   // waiting to be started
   std::queue<std::pair<ClientID, read_stream_id_t>> queue_;
 
+  // To support yielding/re-entrance in scheduleMoreDigests()
+  bool scheduling_{false};
+  std::unique_ptr<Timer> reschedule_timer_;
+
   // get the ClientDigests object for the given client ID, create one if no
   // existing object is found.
   ClientDigests* insertOrGet(ClientID cid);
 
   ClientDigests* getClient(ClientID cid);
-
-  CachedDigest* getDigest(ClientID cid, read_stream_id_t rid);
 
   // activate an inactive digest
   void activateDigest(CachedDigest* digest);
@@ -215,6 +247,9 @@ class AllCachedDigests {
   void scheduleMoreDigests();
 
   bool canStartDigest() const;
+
+  // maximum number of streams processed for each scheduling batch
+  static constexpr size_t MAX_STREAMS_STARTED_BATCH = 200;
 };
 
 }} // namespace facebook::logdevice

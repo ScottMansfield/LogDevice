@@ -7,13 +7,13 @@
  */
 #pragma once
 
-#include "logdevice/common/configuration/Configuration.h"
-#include "logdevice/common/LibeventTimer.h"
 #include "logdevice/common/NodeSetAccessor.h"
 #include "logdevice/common/NodeSetFinder.h"
 #include "logdevice/common/Request.h"
 #include "logdevice/common/RequestType.h"
 #include "logdevice/common/ShardAuthoritativeStatusMap.h"
+#include "logdevice/common/Timer.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/protocol/GET_HEAD_ATTRIBUTES_Message.h"
 #include "logdevice/common/protocol/GET_HEAD_ATTRIBUTES_REPLY_Message.h"
 #include "logdevice/include/Client.h"
@@ -123,7 +123,7 @@ class GetHeadAttributesRequest : public Request,
   const std::chrono::milliseconds client_timeout_;
   const get_head_attributes_callback_t callback_;
 
-  std::unique_ptr<LibeventTimer> client_timeout_timer_{nullptr};
+  std::unique_ptr<Timer> client_timeout_timer_{nullptr};
   std::unique_ptr<NodeSetFinder> nodeset_finder_{nullptr};
   std::unique_ptr<StorageSetAccessor> nodeset_accessor_{nullptr};
 

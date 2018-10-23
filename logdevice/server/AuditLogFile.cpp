@@ -10,13 +10,13 @@
 
 #include <folly/json.h>
 
-#include "logdevice/common/commandline_util_chrono.h"
 #include "logdevice/common/Timestamp.h"
+#include "logdevice/common/commandline_util_chrono.h"
 #include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/server/LocalLogFile.h"
-#include "logdevice/server/locallogstore/PartitionedRocksDBStore.h"
 #include "logdevice/server/ServerPluginPack.h"
 #include "logdevice/server/ServerProcessor.h"
+#include "logdevice/server/locallogstore/PartitionedRocksDBStore.h"
 
 namespace facebook { namespace logdevice {
 
@@ -68,8 +68,11 @@ void log_trim_movement(ServerProcessor& processor,
   entry.client_address = client_address;
   entry.identity = identity;
 
-  static std::string build_info =
-      processor.getPlugin()->createBuildInfo()->version();
+  static auto build_info_plugin =
+      processor.getPluginRegistry()->getSinglePlugin<BuildInfo>(
+          PluginType::BUILD_INFO);
+  ld_check(build_info_plugin);
+  static std::string build_info = build_info_plugin->version();
   entry.build_info = build_info;
 
   std::shared_ptr<Configuration> config = processor.config_->get();
@@ -81,9 +84,8 @@ void log_trim_movement(ServerProcessor& processor,
   entry.host_address = node_config->address.toStringNoPort();
   std::shared_ptr<configuration::LocalLogsConfig> logs_config =
       config->localLogsConfig();
-
   if (!MetaDataLog::isMetaDataLog(log_id)) {
-    auto log_group = logs_config->getLogGroupByIDRaw(log_id);
+    auto log_group = logs_config->getLogGroupByIDShared(log_id);
     if (log_group) {
       entry.log_group = log_group->name();
       auto retention = *log_group->attrs().backlogDuration();

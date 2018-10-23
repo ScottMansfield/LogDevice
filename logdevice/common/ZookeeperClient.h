@@ -7,26 +7,28 @@
  */
 #pragma once
 
-#include <boost/noncopyable.hpp>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <boost/noncopyable.hpp>
 #include <zookeeper/zookeeper.h>
-#include "logdevice/common/debug.h"
-#include "logdevice/common/configuration/ServerConfig.h"
+
 #include "logdevice/common/UpdateableSharedPtr.h"
 #include "logdevice/common/ZookeeperClientBase.h"
+#include "logdevice/common/configuration/ServerConfig.h"
+#include "logdevice/common/debug.h"
 
 namespace facebook { namespace logdevice {
 
 /**
  * Production Zookeper factory used to create ZookeeperClient instances,
- * which connect to  Zookeeper servers.
- * initialized using zookeeper_quorum from ServerConfig.
+ * which connect to Zookeeper servers.
  */
-std::unique_ptr<ZookeeperClientBase> zkFactoryProd(const ServerConfig& config);
+std::unique_ptr<ZookeeperClientBase>
+zkFactoryProd(const configuration::ZookeeperConfig& config);
 
 class ZookeeperClient : public ZookeeperClientBase {
  public:

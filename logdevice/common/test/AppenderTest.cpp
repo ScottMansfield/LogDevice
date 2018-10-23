@@ -5,23 +5,24 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
-#include <gtest/gtest.h>
+#include "logdevice/common/Appender.h"
+
 #include <unordered_map>
 
 #include <folly/Memory.h>
-#include <opentracing/mocktracer/tracer.h>
+#include <gtest/gtest.h>
 #include <opentracing/mocktracer/in_memory_recorder.h>
+#include <opentracing/mocktracer/tracer.h>
 
-#include "logdevice/common/Appender.h"
-#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/EventLoopHandle.h"
 #include "logdevice/common/LinearCopySetSelector.h"
 #include "logdevice/common/NoopTraceLogger.h"
 #include "logdevice/common/PassThroughCopySetManager.h"
 #include "logdevice/common/Sender.h"
-#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/Worker.h"
+#include "logdevice/common/configuration/Configuration.h"
 #include "logdevice/common/configuration/LocalLogsConfig.h"
+#include "logdevice/common/configuration/UpdateableConfig.h"
 #include "logdevice/common/debug.h"
 #include "logdevice/common/protocol/APPENDED_Message.h"
 #include "logdevice/common/protocol/DELETE_Message.h"
@@ -773,7 +774,7 @@ void AppenderTest::updateConfig() {
     ld_check(!nodes.count(nid));
     Configuration::Node& node = nodes[nid];
     node.address = Sockaddr("::1", folly::to<std::string>(4440 + nid));
-    node.generation = 0;
+    node.generation = 1;
     node.addStorageRole();
     node.addSequencerRole();
   }
@@ -793,7 +794,7 @@ void AppenderTest::updateConfig() {
       createMetaDataLogsConfig(nodes_config, nodes_config.getNodes().size(), 3);
 
   config_.updateableServerConfig()->update(
-      ServerConfig::fromData(__FILE__, nodes_config, meta_config));
+      ServerConfig::fromDataTest(__FILE__, nodes_config, meta_config));
   config_.updateableLogsConfig()->update(std::move(logs_config));
   config_.get()->serverConfig()->setMyNodeID(NodeID(10, 20));
 

@@ -6,16 +6,16 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <memory>
+
 #include <gtest/gtest.h>
 
 #include "event2/buffer.h"
-#include "logdevice/common/util.h"
 #include "logdevice/common/libevent/compat.h"
 #include "logdevice/common/protocol/APPEND_Message.h"
-#include "logdevice/common/protocol/STORE_Message.h"
-
 #include "logdevice/common/protocol/ProtocolReader.h"
 #include "logdevice/common/protocol/ProtocolWriter.h"
+#include "logdevice/common/protocol/STORE_Message.h"
+#include "logdevice/common/util.h"
 
 namespace facebook { namespace logdevice {
 
@@ -106,7 +106,6 @@ E2ETracingSerializationTest::simpleRoundTrip(Message* msg_to_send,
                         ap_to_send_evbuf,
                         Compatibility::MAX_PROTOCOL_SUPPORTED);
   msg_to_send->serialize(writer);
-  writer.endSerialization();
   ssize_t ap_to_send_size = writer.result();
   ld_check(ap_to_send_size > 0);
 

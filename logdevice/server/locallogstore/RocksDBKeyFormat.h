@@ -11,7 +11,6 @@
 
 #include <folly/CppAttributes.h>
 #include <folly/small_vector.h>
-
 #include <rocksdb/slice.h>
 
 #include "logdevice/common/Metadata.h"
@@ -51,8 +50,6 @@ enum class KeyPrefix : char {
   CustomIndexDirectory = 'M',
   LogMeta_LastReleased = 'm',
   // NOTE 'o' is deprecated and removed from shards on startup from now on
-  // TODO (T24192781) get rid of this once it's gone everywhere
-  OldestPartition = 'o',
   PartitionDirectory = 'p',
   StoreMeta_RebuildingRanges = 'q',
   LogMeta_RebuildingCheckpoint = 'R',
@@ -83,12 +80,12 @@ constexpr char prefix(KeyPrefix prefix) {
  * The old format was (header, log_id, lsn, wave), the new format is
  * (header, log_id, lsn), i.e. we're getting rid of the wave in key because wave
  * is now in value instead.
- * The current state is that we're writing the old format but accept both old
+ * The current state is that we're writing the new format but accept both old
  * and new.
  * TODO (#10357210):
- *   When this version is deployed everywhere and stable, start writing in new
- *   format. Then, after all old-format data was trimmed (which is not soon for
- *   metadata logs), stop accepting the old format.
+ *   After all old-format data was trimmed (which may take a long time for
+ *   metadata logs), stop accepting the old format. The write side was switched
+ *   to new format around October 2018.
  *
  * Until everything is converted, different operations should use slightly
  * different key. Use the appropriate sliceFor*() method.
@@ -125,7 +122,7 @@ class DataKey {
     // because older versions don't understand the new format.
     wave_DEPRECATED_ = 0xeeeeeeeeu;
     return rocksdb::Slice(reinterpret_cast<const char*>(this),
-                          fmt == Format::NEW
+                          fmt != Format::OLD
                               ? offsetof(DataKey, wave_DEPRECATED_)
                               : sizeof(DataKey));
   }
@@ -137,6 +134,10 @@ class DataKey {
         rocksdb::Slice(reinterpret_cast<const char*>(this),
                        offsetof(DataKey, wave_DEPRECATED_)),
         rocksdb::Slice(reinterpret_cast<const char*>(this), sizeof(DataKey))};
+  }
+
+  static size_t sizeForWriting() {
+    return offsetof(DataKey, wave_DEPRECATED_);
   }
 
   /**
@@ -436,20 +437,6 @@ class PartitionDirectoryKey {
   uint64_t log_id_big_endian_;
   uint64_t lsn_big_endian_;
   uint64_t partition_id_big_endian_;
-} __attribute__((__packed__));
-
-/**
- * NOTE Deprecated, only kept so we can find and remove such entries on startup
- * ID of the oldest non-dropped partition.
- */
-class OldestPartitionKey_DEPRECATED_DO_NOT_USE {
- public:
-  OldestPartitionKey_DEPRECATED_DO_NOT_USE() {}
-
-  static constexpr char HEADER = prefix(KeyPrefix::OldestPartition);
-
- private:
-  char header = HEADER;
 } __attribute__((__packed__));
 
 /**
